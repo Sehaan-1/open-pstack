@@ -10,15 +10,17 @@ import {
 } from "../types.ts";
 
 declare const laneBrand: unique symbol;
+declare const accessBrand: unique symbol;
 
-export type Access =
+export type Access = (
   | { readonly mode: "read-only" }
-  | { readonly mode: "isolated-write"; readonly sandbox: WriterSandbox };
+  | { readonly mode: "isolated-write"; readonly sandbox: WriterSandbox }
+) & { readonly [accessBrand]: true };
 
 export function access(mode: AccessMode, sandbox: WriterSandbox = "bounded"): Access {
-  if (mode === "isolated-write") return { mode, sandbox };
+  if (mode === "isolated-write") return { mode, sandbox } as Access;
   if (sandbox === "full-access") throw new UsageError("writer sandbox full-access requires mode isolated-write");
-  return { mode };
+  return { mode } as Access;
 }
 
 export function accessKind(value: Access): AccessKind {

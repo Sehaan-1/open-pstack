@@ -21,6 +21,7 @@ import {
   WRITE_COMMAND,
   writeGenerated,
 } from "./registry/render.ts";
+import { type Access, access } from "./registry/contract.ts";
 import { EFFORTS } from "./types.ts";
 
 const RUNNER = import.meta.dir;
@@ -470,15 +471,28 @@ describe("resolveLane", () => {
     }
   });
 
+  it("types only access() results as Access", () => {
+    type Extends<A, B> = [A] extends [B] ? true : false;
+    const bareReader: Extends<{ readonly mode: "read-only" }, Access> = false;
+    const bareWriter: Extends<{ readonly mode: "isolated-write"; readonly sandbox: "bounded" }, Access> = false;
+    const reader = access("read-only");
+    const writer = access("isolated-write", "full-access");
+    const builtReader: Extends<typeof reader, Access> = true;
+    const builtWriter: Extends<typeof writer, Access> = true;
+    expect([bareReader, bareWriter, builtReader, builtWriter]).toEqual([false, false, true, true]);
+    expect<object>(reader).toEqual({ mode: "read-only" });
+    expect<object>(writer).toEqual({ mode: "isolated-write", sandbox: "full-access" });
+  });
+
   it("builds a bounded writer unless full access is requested, and refuses full access off a Codex writer", () => {
     const codex = (overrides: Partial<LaneRequest>) =>
       resolveLane(request({ parent: "claude", provider: "codex", model: "gpt-6.1-sol", ...overrides }));
-    expect(codex({}).access).toEqual({ mode: "read-only" });
-    expect(codex({ writerSandbox: "bounded" }).access).toEqual({ mode: "read-only" });
-    expect(codex({ mode: "isolated-write" }).access).toEqual({ mode: "isolated-write", sandbox: "bounded" });
-    expect(codex({ mode: "isolated-write", writerSandbox: "bounded" }).access).toEqual({ mode: "isolated-write", sandbox: "bounded" });
+    expect(codex({}).access).toEqual(access("read-only"));
+    expect(codex({ writerSandbox: "bounded" }).access).toEqual(access("read-only"));
+    expect(codex({ mode: "isolated-write" }).access).toEqual(access("isolated-write"));
+    expect(codex({ mode: "isolated-write", writerSandbox: "bounded" }).access).toEqual(access("isolated-write"));
     expect(codex({ mode: "isolated-write", writerSandbox: "full-access" }).access)
-      .toEqual({ mode: "isolated-write", sandbox: "full-access" });
+      .toEqual(access("isolated-write", "full-access"));
     expect(() => codex({ writerSandbox: "full-access" })).toThrow("writer sandbox full-access requires mode isolated-write");
     expect(() => codex({ mode: "isolated-write", writerSandbox: "danger-full-access" }))
       .toThrow("writer-sandbox must be one of: bounded, full-access");
