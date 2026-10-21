@@ -52,7 +52,6 @@ export interface SessionRecord {
   commands: string[];
   tools: { name: string; id: string; input: Record<string, any>; parent: string | null; result?: string; failed: boolean }[];
   context: string[];
-  reply: string;
 }
 export interface Driver {
   preflight(receipt: Receipt): Promise<void>;

@@ -15,7 +15,7 @@ async function waitingSession(harness: Harness): Promise<{ f: Fixture; c: Case; 
   const f = { harness, dir, workspace: dir, location: dir, configHome: dir, run: command };
   const c = recipe(`skill-invocation:${skill}`, harness)[0]!;
   await c.prepare!(f);
-  const record = { harness, exitCode: 0, started: Date.now() - 1000, skills: [`pstack:${skill}`], commands: [], tools: [], context: [], reply: '' };
+  const record = { harness, exitCode: 0, started: Date.now() - 1000, skills: [`pstack:${skill}`], commands: [], tools: [], context: [] };
   await writeFile(join(dir, 'result.md'), 'Waiting for you to approve inspection. I did not inspect anything.');
   return { f, c, record };
 }

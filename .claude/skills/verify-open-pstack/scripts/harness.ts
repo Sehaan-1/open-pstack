@@ -39,8 +39,7 @@ export function parseSession(harness: Harness, text: string, exitCode: number, s
       .flatMap(e => [...(e.message.content as string).matchAll(/<command-name>\/([^<\s]+)<\/command-name>/g)].map(m => m[1]!));
     const context = stream.filter(e => e.type === 'system' && e.subtype === 'hook_response' && e.hook_event === 'SessionStart' &&
       e.exit_code === 0 && e.outcome === 'success' && typeof e.stdout === 'string').map(e => e.stdout as string);
-    const result = stream.findLast(e => e.type === 'result')?.result;
-    return { harness, exitCode, started, context, reply: typeof result === 'string' ? result : '',
+    return { harness, exitCode, started, context,
       skills: [...commands, ...uses.filter(u => u.name === 'Skill' && typeof u.input?.skill === 'string').map(u => u.input.skill as string)],
       commands: uses.filter(u => u.name === 'Bash' && typeof u.input?.command === 'string').map(u => u.input.command as string),
       tools: stream.filter(e => e.type === 'assistant' && Array.isArray(e.message?.content)).flatMap(e => (e.message.content as Event[]).filter(b => b.type === 'tool_use')
@@ -59,8 +58,7 @@ export function parseSession(harness: Harness, text: string, exitCode: number, s
     .map(([, name, path]) => path!.includes('/plugins/cache/open-pstack/pstack/') ? name! : path!);
   const tools = items.filter(i => i.type === 'command_execution' && typeof i.command === 'string').map(i => ({ name: 'command', id: String(i.id),
     input: { command: i.command as string }, result: typeof i.aggregated_output === 'string' ? i.aggregated_output : undefined, parent: null, failed: i.exit_code !== 0 }));
-  const reply = items.findLast(i => i.type === 'agent_message')?.text;
-  return { harness, exitCode, started, skills, commands, tools, context, reply: typeof reply === 'string' ? reply : '' };
+  return { harness, exitCode, started, skills, commands, tools, context };
 }
 export async function codexInstallation(output: string, home: string, expected: string): Promise<string> {
   const result = JSON.parse(output);

@@ -4,7 +4,6 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { readCatalog, recipe, type Case, type Catalog, type Fixture } from '../features/recipes.ts';
-import { parseSession } from './harness.ts';
 import { command } from './io.ts';
 import type { Harness, SessionRecord } from './types.ts';
 
@@ -17,7 +16,7 @@ async function fixture(harness: Harness): Promise<Fixture> {
   return { harness, dir, workspace, location, configHome: dir, run: command };
 }
 const record = (harness: Harness, skill: string): SessionRecord =>
-  ({ harness, exitCode: 0, started: Date.now() - 1000, skills: [skill], commands: [], tools: [], context: [], reply: '' });
+  ({ harness, exitCode: 0, started: Date.now() - 1000, skills: [skill], commands: [], tools: [], context: [] });
 const sheet = async (path: string): Promise<Map<string, string[]>> => new Map((await readFile(path, 'utf8')).split('\n')
   .filter(line => /^[a-z][^:]*: \S/.test(line)).map((line): [string, string[]] => [line.slice(0, line.indexOf(': ')), line.slice(line.indexOf(': ') + 2).split(', ')]));
 const setupCase = (id: string): Case => recipe('setup', 'claude').find(c => c.id === id)!;
@@ -288,16 +287,10 @@ test('the first-run case requires a sheet equal to the catalog role defaults', a
   await writeFile(path, written);
   await expect(c.assert(record('codex', 'pstack:setup-pstack'), f)).rejects.toThrow('codex-mirror-mismatch');
   await mirror(f, written);
-  expect((await c.assert(record('codex', 'pstack:setup-pstack'), f)).assertions).toEqual(expect.arrayContaining(['sheet:role-defaults', 'no-skill-directory']));
+  expect((await c.assert(record('codex', 'pstack:setup-pstack'), f)).assertions).toContain('sheet:role-defaults');
   await rejectsUnbounded(c, f, written);
   await writeFile(path, `# pstack model configuration\n\n${lines.slice(1).join('\n')}\n`);
   await expect(c.assert(record('codex', 'pstack:setup-pstack'), f)).rejects.toThrow('first-run-not-role-defaults');
-  await writeFile(path, written);
-  for (const skills of ['.claude/skills', '.agents/skills']) {
-    await mkdir(join(f.dir, skills), { recursive: true });
-    await expect(c.assert(record('codex', 'pstack:setup-pstack'), f)).rejects.toThrow(`first-run-offer-accepted:${skills}`);
-    await rm(join(f.dir, skills.split('/')[0]!), { recursive: true });
-  }
 });
 
 test('the configure case answers yes to full access and requires that setting with only the Opus descriptor', async () => {
@@ -348,106 +341,32 @@ test('the full-access writer case quotes each browser argument for sh and encode
 });
 
 for (const harness of ['claude', 'codex'] as const) {
-  test(`${harness}: the keep-setting case gives no answers and requires an unchanged sheet and mirror, SETUP-DONE, and no question in Claude`, async () => {
+  test(`${harness}: the keep-setting case requires the setting line and every role line after a rerun`, async () => {
     const f = await fixture(harness), c = recipe('setup', harness).find(c => c.id === 'keep-setting')!, installed = await readCatalog(location);
     await writeFile(join(f.dir, 'AGENTS.md'), 'mirror\n');
     await c.prepare!(f);
-    const path = join(f.dir, 'pstack-models.md'), prepared = await readFile(path, 'utf8');
-    expect(prepared).toBe(`# pstack model configuration\n\n${[...installed.defaults].map(([role, lanes]) => `${role}: ${lanes.join(', ')}`).join('\n')}\n${FULL_ACCESS}`);
-    const agents = harness === 'codex' ? `<!-- pstack:models:begin -->\n${prepared}<!-- pstack:models:end -->\n` : 'mirror\n';
-    expect(await readFile(join(f.dir, 'AGENTS.md'), 'utf8')).toBe(agents);
-    expect(c.prompt(f)).not.toContain('Use these answers');
-    expect(c.prompt(f)).not.toContain('decline');
-    expect(c.prompt(f)).toEndWith('Reply with exactly SETUP-DONE as your final message.');
-    await writeFile(path, prepared);
-    const done = (): SessionRecord => ({ ...record(harness, 'pstack:setup-pstack'), reply: '\nSETUP-DONE\n' });
-    expect((await c.assert(done(), f)).assertions).toEqual(['skill-loaded', 'file:pstack-models.md', ...(harness === 'claude' ? ['no-askuserquestion-attempt'] : []), 'sheet-unchanged',
-      ...(harness === 'codex' ? ['codex-mirror-unchanged'] : []), 'no-skill-directory', 'ended:SETUP-DONE', 'setting:codex writer sandbox: full-access']);
-
-    for (const reply of ['Want a project-local verification skill? I can generate one with /create-verification-skill.', '']) {
-      await expect(c.assert({ ...done(), reply }, f)).rejects.toThrow('keep-setting-did-not-finish');
-    }
-    const asked = done();
-    asked.tools.push({ name: 'AskUserQuestion', id: 'q', input: {}, parent: null, failed: true });
-    if (harness === 'claude') await expect(c.assert(asked, f)).rejects.toThrow('keep-setting-asked');
-    else expect((await c.assert(asked, f)).assertions).not.toContain('no-askuserquestion-attempt');
-    for (const skills of ['.claude/skills', '.agents/skills']) {
-      await mkdir(join(f.dir, skills), { recursive: true });
-      await expect(c.assert(done(), f)).rejects.toThrow(`keep-setting-offer-accepted:${skills}`);
-      await rm(join(f.dir, skills.split('/')[0]!), { recursive: true });
-    }
-    for (const wrong of [prepared.replace(FULL_ACCESS, ''), prepared.replace(FULL_ACCESS, BOUNDED), prepared.replace(/\nbug-fix: [^\n]*/, ''), `${prepared}\n`]) {
-      await writeFile(path, wrong);
-      await expect(c.assert(done(), f)).rejects.toThrow('keep-setting-sheet-changed');
-    }
-    await writeFile(path, prepared);
-    if (harness === 'codex') {
-      await writeFile(join(f.dir, 'AGENTS.md'), `notes\n${agents}`);
-      await expect(c.assert(done(), f)).rejects.toThrow('keep-setting-mirror-changed');
-    }
-  });
-
-  test(`${harness}: the keep-setting case rejects a session that wrote nothing after prepare`, async () => {
-    const f = await fixture(harness), c = recipe('setup', harness).find(c => c.id === 'keep-setting')!;
-    await c.prepare!(f);
-    const started = Date.now();
-    await expect(c.assert({ ...record(harness, 'pstack:setup-pstack'), started }, f)).rejects.toThrow('fixture-file-missing:pstack-models.md');
-  });
-
-  test(`${harness}: every setup prompt but keep-setting and accept-formal-offer declines both verification offers`, async () => {
-    const f = await fixture(harness), decline = 'If setup offers to generate a verification skill or a formal verification skill, decline both.';
-    const cases = recipe('setup', harness);
-    expect(cases.map(c => c.id)).toEqual(['configure', 'consume', 'keep-predecessor', 'new-families', 'read-only-provider', 'writer-refusal', 'keep-setting', 'first-run', 'accept-formal-offer']);
-    for (const c of cases) {
-      if (['keep-setting', 'accept-formal-offer'].includes(c.id)) expect(c.prompt(f)).not.toContain(decline);
-      else expect(c.prompt(f)).toEndWith(decline);
-    }
-  });
-
-  test(`${harness}: the accept-formal-offer case requires setup to load the formal verification creator and end with ACCEPT-ROUTED`, async () => {
-    const f = await fixture(harness), c = recipe('setup', harness).find(c => c.id === 'accept-formal-offer')!;
-    await writeFile(join(f.dir, 'pstack-models.md'), 'stale\n'); await writeFile(join(f.dir, 'AGENTS.md'), 'mirror\n');
-    await c.prepare!(f);
-    await expect(readFile(join(f.dir, 'pstack-models.md'))).rejects.toThrow();
     if (harness === 'codex') await expect(readFile(join(f.dir, 'AGENTS.md'))).rejects.toThrow();
-    expect(c.prompt(f)).toContain('Keep the first-run role assignments and every proposed effort. I confirm every write.');
-    expect(c.prompt(f)).not.toMatch(/formal/i);
-    expect(c.prompt(f)).toEndWith('Decline the offer to run /create-verification-skill. Accept any other offer setup makes. When the skill that offer starts loads, stop at once without doing its work and reply with exactly ACCEPT-ROUTED as your final message.');
-    const creator = 'pstack:create-formal-verification-skill';
-    const routed = (skills: string[], reply = 'ACCEPT-ROUTED'): SessionRecord => ({ ...record(harness, 'pstack:setup-pstack'), skills, reply });
-    expect((await c.assert(routed(['pstack:setup-pstack', creator]), f)).assertions)
-      .toEqual(['skill-loaded', 'routed:create-formal-verification-skill', 'ended:ACCEPT-ROUTED']);
-    for (const skills of [['pstack:setup-pstack'], [creator, 'pstack:setup-pstack'], ['pstack:setup-pstack', 'pstack:create-verification-skill']]) {
-      await expect(c.assert(routed(skills), f)).rejects.toThrow('skill-not-routed:create-formal-verification-skill');
+    else expect(await readFile(join(f.dir, 'AGENTS.md'), 'utf8')).toBe('mirror\n');
+    const path = join(f.dir, 'pstack-models.md'), prepared = await readFile(path, 'utf8');
+    expect(prepared).toEndWith('\ncodex writer sandbox: full-access\n');
+    const omitted = [...installed.defaults.keys()].find(role => !prepared.includes(`\n${role}: `))!;
+    expect(installed.defaults.get(omitted)).toEqual(['inherit-parent']);
+    const rerun = prepared.replace('codex writer sandbox: full-access\n', `${omitted}: inherit-parent\ncodex writer sandbox: full-access\n`);
+    await writeFile(path, rerun);
+    if (harness === 'codex') await mirror(f, rerun);
+    expect((await c.assert(record(harness, 'pstack:setup-pstack'), f)).assertions)
+      .toEqual(['skill-loaded', 'file:pstack-models.md', ...(harness === 'codex' ? ['codex-mirror'] : []), 'setting:codex writer sandbox: full-access']);
+
+    for (const [wrong, reason] of [
+      [rerun.replace('codex writer sandbox: full-access\n', ''), 'setting-not-kept'],
+      [rerun.replace('sandbox: full-access', 'sandbox: bounded'), 'setting-not-kept'],
+      [rerun.replace(/\nbug-fix: [^\n]*/, ''), 'keep-setting-sheet-mismatch'],
+    ]) {
+      await writeFile(path, wrong!);
+      await expect(c.assert(record(harness, 'pstack:setup-pstack'), f)).rejects.toThrow(reason);
     }
-    await expect(c.assert(routed(['pstack:setup-pstack', creator], 'Want a formal verification skill?'), f)).rejects.toThrow('accept-formal-offer-did-not-finish');
   });
 }
-
-test('codex: accept-formal-offer counts a successful command whose output carries the installed creator\'s name and description lines', async () => {
-  const base = await fixture('codex'), installed = join(base.dir, 'plugins/cache/open-pstack/pstack/1.16.0'), f = { ...base, location: installed };
-  const suffix = 'skills/create-formal-verification-skill/SKILL.md', creator = await readFile(join(location, suffix), 'utf8');
-  await mkdir(join(installed, 'skills/create-formal-verification-skill'), { recursive: true });
-  await writeFile(join(installed, suffix), creator);
-  const c = recipe('setup', 'codex').find(c => c.id === 'accept-formal-offer')!;
-  const rollout = JSON.stringify({ type: 'response_item', payload: { type: 'message', role: 'user', content: [{ type: 'input_text',
-    text: `<skill>\n<name>pstack:setup-pstack</name>\n<path>${installed}/skills/setup-pstack/SKILL.md</path>\n---\nname: setup-pstack\n---\n</skill>` }] } });
-  const read = (cat: string, output = creator, exitCode = 0) => ({ type: 'item.completed', item: { id: 'item_21', type: 'command_execution',
-    command: `/bin/zsh -lc '${cat}'`, aggregated_output: output, exit_code: exitCode, status: exitCode ? 'failed' : 'completed' } });
-  const done = { type: 'item.completed', item: { id: 'item_22', type: 'agent_message', text: 'ACCEPT-ROUTED' } };
-  const session = (...events: object[]) => parseSession('codex', events.map(e => JSON.stringify(e)).join('\n'), 0, 0, rollout);
-  const relative = `cat ../../.codex/plugins/cache/open-pstack/pstack/1.16.0/${suffix}`, numbered = creator.split('\n').map((line, i) => `${String(i + 1).padStart(6)}\t${line}`).join('\n');
-  for (const event of [read(relative), read(`cat $CODEX_HOME/plugins/cache/open-pstack/pstack/1.16.0/${suffix}`),
-    read(`cat "\${CODEX_HOME}/plugins/cache/open-pstack/pstack/1.16.0/${suffix}"`), read(`cat -n ${join(installed, suffix)}`, numbered)]) {
-    expect(session(event, done).skills).toEqual(['pstack:setup-pstack']);
-    expect((await c.assert(session(event, done), f)).assertions).toEqual(['skill-loaded', 'routed:create-formal-verification-skill', 'ended:ACCEPT-ROUTED']);
-  }
-  const nameOnly = creator.split('\n').filter(line => !line.startsWith('description: ')).join('\n');
-  const other = await readFile(join(location, 'skills/setup-pstack/SKILL.md'), 'utf8');
-  for (const events of [[read(relative, creator, 1), done], [read(relative, nameOnly), done], [read('cat skills/setup-pstack/SKILL.md', other), done], [done]]) {
-    await expect(c.assert(session(...events), f)).rejects.toThrow('skill-not-routed:create-formal-verification-skill');
-  }
-});
 
 const FAKE_CODEX = `#!/bin/sh
 if [ "$1" = "login" ]; then echo 'Logged in using ChatGPT'; exit 0; fi

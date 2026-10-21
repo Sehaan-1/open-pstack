@@ -233,7 +233,7 @@ describe('exact-head evidence publication', () => {
   test('more than the session limit is refused before preflight unless --wide gives a reason', async () => {
     const limited = (...extra: string[]) => {
       const f = fixture(true); f.options.github.files = async () => [{ filename: 'plugins/pstack/skills/poteto-mode/references/codex-tools.md' }];
-      f.options.features = ['claude:setup', 'claude:runner', ...extra];
+      f.options.features = ['claude:setup', 'claude:runner', 'claude:hook:startup', ...extra];
       return f;
     };
     expect(SESSION_LIMIT).toBe(12);

@@ -52,7 +52,7 @@ async function simulatedRecord(f: Fixture, available: boolean): Promise<SessionR
     tools = [tool('Bash', { command: `cat -n ${claudeTranscript(f)}` }, await readFile(claudeTranscript(f), 'utf8'))];
   }
   if (!available) await writeFile(join(f.dir, 'digest.md'), 'The requested opening is missing from this synthetic fixture.');
-  return { harness: f.harness, exitCode: 0, started: Date.now() - 1000, skills: ['pstack:reflect'], commands: [], tools, context: [], reply: '' };
+  return { harness: f.harness, exitCode: 0, started: Date.now() - 1000, skills: ['pstack:reflect'], commands: [], tools, context: [] };
 }
 
 async function prepared(harness: Harness, index = 0): Promise<{ f: Fixture; c: Case; record: SessionRecord }> {
