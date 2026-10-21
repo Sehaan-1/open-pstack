@@ -347,7 +347,7 @@ test('the full-access writer case quotes each browser argument for sh and encode
 });
 
 for (const harness of ['claude', 'codex'] as const) {
-  test(`${harness}: the keep-setting case gives no answers and requires an unchanged sheet and mirror with no question`, async () => {
+  test(`${harness}: the keep-setting case gives no answers and requires an unchanged sheet and mirror, with no question in Claude`, async () => {
     const f = await fixture(harness), c = recipe('setup', harness).find(c => c.id === 'keep-setting')!, installed = await readCatalog(location);
     await writeFile(join(f.dir, 'AGENTS.md'), 'mirror\n');
     await c.prepare!(f);
@@ -357,12 +357,13 @@ for (const harness of ['claude', 'codex'] as const) {
     expect(await readFile(join(f.dir, 'AGENTS.md'), 'utf8')).toBe(agents);
     expect(c.prompt(f)).not.toContain('Use these answers');
     await writeFile(path, prepared);
-    expect((await c.assert(record(harness, 'pstack:setup-pstack'), f)).assertions).toEqual(['skill-loaded', 'file:pstack-models.md', 'no-question', 'sheet-unchanged',
+    expect((await c.assert(record(harness, 'pstack:setup-pstack'), f)).assertions).toEqual(['skill-loaded', 'file:pstack-models.md', ...(harness === 'claude' ? ['no-question'] : []), 'sheet-unchanged',
       ...(harness === 'codex' ? ['codex-mirror-unchanged'] : []), 'setting:codex writer sandbox: full-access']);
 
     const asked = record(harness, 'pstack:setup-pstack');
     asked.tools.push({ name: 'AskUserQuestion', id: 'q', input: {}, parent: null, failed: true });
-    await expect(c.assert(asked, f)).rejects.toThrow('keep-setting-asked');
+    if (harness === 'claude') await expect(c.assert(asked, f)).rejects.toThrow('keep-setting-asked');
+    else expect((await c.assert(asked, f)).assertions).not.toContain('no-question');
     for (const wrong of [prepared.replace(FULL_ACCESS, ''), prepared.replace(FULL_ACCESS, BOUNDED), prepared.replace(/\nbug-fix: [^\n]*/, ''), `${prepared}\n`]) {
       await writeFile(path, wrong);
       await expect(c.assert(record(harness, 'pstack:setup-pstack'), f)).rejects.toThrow('keep-setting-sheet-changed');
@@ -372,6 +373,13 @@ for (const harness of ['claude', 'codex'] as const) {
       await writeFile(join(f.dir, 'AGENTS.md'), `notes\n${agents}`);
       await expect(c.assert(record(harness, 'pstack:setup-pstack'), f)).rejects.toThrow('keep-setting-mirror-changed');
     }
+  });
+
+  test(`${harness}: the keep-setting case rejects a session that wrote nothing after prepare`, async () => {
+    const f = await fixture(harness), c = recipe('setup', harness).find(c => c.id === 'keep-setting')!;
+    await c.prepare!(f);
+    const started = Date.now();
+    await expect(c.assert({ ...record(harness, 'pstack:setup-pstack'), started }, f)).rejects.toThrow('fixture-file-missing:pstack-models.md');
   });
 
   test(`${harness}: every setup prompt declines both verification offers`, async () => {

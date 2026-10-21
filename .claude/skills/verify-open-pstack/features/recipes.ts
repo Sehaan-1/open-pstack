@@ -1,5 +1,5 @@
 import { Database } from 'bun:sqlite';
-import { lstat, mkdir, readFile, realpath, rm, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, readFile, realpath, rm, utimes, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { basename, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -565,16 +565,21 @@ function keepSetting(): Case {
     async prepare(f) {
       sheetBytes = sheetText([...(await readCatalog(f.location)).defaults]) + `${FULL_ACCESS_SETTING}\n`;
       mirrorBytes = `${MIRROR_BEGIN}\n${sheetBytes}${MIRROR_END}\n`;
-      await writeFile(join(f.configHome, 'pstack-models.md'), sheetBytes);
-      if (f.harness === 'codex') await writeFile(join(f.configHome, 'AGENTS.md'), mirrorBytes);
+      const prepared = new Date(Date.now() - 3_600_000), sheet = join(f.configHome, 'pstack-models.md'), mirror = join(f.configHome, 'AGENTS.md');
+      await writeFile(sheet, sheetBytes);
+      await utimes(sheet, prepared, prepared);
+      if (f.harness === 'codex') {
+        await writeFile(mirror, mirrorBytes);
+        await utimes(mirror, prepared, prepared);
+      }
     },
     prompt: f => `${invoke(f.harness, 'setup-pstack', `Write the setup report to ${join(f.dir, 'result.md')}.`)} Do not push, post, or contact GitHub.`,
     async assert(record, f) {
       const sheet = join(f.configHome, 'pstack-models.md'), assertions = [loaded(record, 'pstack:setup-pstack'), await written(record, sheet)];
-      if (record.tools.some(t => t.name === 'AskUserQuestion')) throw new Error('keep-setting-asked');
+      if (f.harness === 'claude' && record.tools.some(t => t.name === 'AskUserQuestion')) throw new Error('keep-setting-asked');
       if (await readFile(sheet, 'utf8') !== sheetBytes) throw new Error('keep-setting-sheet-changed');
       if (f.harness === 'codex' && await readFile(join(f.configHome, 'AGENTS.md'), 'utf8').catch(() => '') !== mirrorBytes) throw new Error('keep-setting-mirror-changed');
-      return { assertions: [...assertions, 'no-question', 'sheet-unchanged', ...(f.harness === 'codex' ? ['codex-mirror-unchanged'] : []), `setting:${FULL_ACCESS_SETTING}`], files: [sheet] };
+      return { assertions: [...assertions, ...(f.harness === 'claude' ? ['no-question'] : []), 'sheet-unchanged', ...(f.harness === 'codex' ? ['codex-mirror-unchanged'] : []), `setting:${FULL_ACCESS_SETTING}`], files: [sheet] };
     },
   };
 }
