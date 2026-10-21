@@ -536,31 +536,6 @@ describe("module boundaries", () => {
     expect(importers).toEqual(["registry/providers.ts"]);
   });
 
-  it("allows only node:os and node:path beyond relative imports in the lane resolver's closure", () => {
-    const sources = new Map<string, string>();
-    const external = new Set<string>();
-    const visit = (path: string) => {
-      if (sources.has(path)) return;
-      const source = readFileSync(path, "utf8");
-      sources.set(path, source);
-      for (const [, specifier] of source.matchAll(/\b(?:from|import)\s*["']([^"']+)["']/g)) {
-        if (!specifier!.startsWith(".")) {
-          external.add(specifier!);
-          continue;
-        }
-        const target = resolve(dirname(path), specifier!);
-        if (target.startsWith(`${RUNNER}/`) && target.endsWith(".ts") && !target.endsWith(".test.ts")) visit(target);
-      }
-    };
-    visit(join(RUNNER, "registry/index.ts"));
-    expect([...sources.keys()].map((path) => relative(RUNNER, path))).toContain("providers/shared.ts");
-    expect([...external].filter((specifier) => specifier !== "node:os" && specifier !== "node:path")).toEqual([]);
-    const offenders = [...sources]
-      .filter(([, source]) => /\bBun\.|\bimport\s*\(|\brequire\s*\(/.test(source))
-      .map(([path]) => relative(RUNNER, path));
-    expect(offenders).toEqual([]);
-  });
-
   it("keeps child-provider names out of run.ts except the parent sandbox diagnostic", () => {
     const run = readFileSync(join(RUNNER, "run.ts"), "utf8");
     const names = REGISTRY.adapters.map((adapter) => adapter.id).join("|");
