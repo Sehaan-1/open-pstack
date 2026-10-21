@@ -115,6 +115,28 @@ describe('exact-head evidence publication', () => {
     expect((await verify(f.options)).status).toBe('success');
     expect(f.calls).toContain('prepare');
   });
+  test('a shared recipe change runs only the named recipe and project proof from the candidate publisher', async () => {
+    const selected = 'codex:skill-invocation:principle-never-block-on-the-human';
+    for (const revision of [REVISION, SHA]) {
+      const f = fixture(true);
+      f.options.publisherRevision = revision;
+      f.options.features = [selected];
+      f.options.github.files = async () => [{ filename: '.claude/skills/verify-open-pstack/features/recipes.ts' }];
+      if (revision !== SHA) {
+        await expect(verify(f.options)).rejects.toThrow('rerun from that checkout');
+        expect(f.calls.some(call => ['preflight', 'prepare', 'exercise', 'comment'].includes(call) || call.startsWith('status:'))).toBe(false);
+      } else {
+        const receipt = await verify(f.options);
+        expect(receipt.status).toBe('success');
+        expect(receipt.runFeatures).toEqual([selected, 'claude:project-skill', 'codex:project-skill']);
+        expect(receipt.selection.features.length).toBeGreaterThan(receipt.runFeatures.length);
+        expect(receipt.sessions).toBe(3);
+        expect(receipt.observations.map(record => `${record.harness}/${record.feature}`).sort()).toEqual([
+          'claude/project-skill', 'codex/project-skill', 'codex/skill-invocation:principle-never-block-on-the-human',
+        ]);
+      }
+    }
+  });
 
   test('successful verification restores setup and removes Codex run state before any publication', async () => {
     const f = fixture(true); f.options.driver.cleanup = async () => { f.calls.push('cleanup'); };

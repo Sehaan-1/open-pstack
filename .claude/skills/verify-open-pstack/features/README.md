@@ -16,6 +16,8 @@ The ownership table below says which features a changed path reaches. `SKILL.md`
 | `project` | Native discovery/invocation of this verifier in both harnesses |
 | `nonRuntime` | Explicit ordinary repository documentation, policy, non-shipped assets, and unit-test paths; no plugin harness launch |
 
+A change to `features/recipes.ts` can name any feature that has a recipe.
+
 A change to `plugins/pstack/.claude-plugin/plugin.json`, `.claude-plugin/marketplace.json`, or `plugins/pstack/.codex-plugin/plugin.json` is version-only when the merge base and the head hold the same regular file with the same mode, both sides parse as JSON objects, at least one version string changed (top-level `version`, or `plugins[].version` in the marketplace), and nothing else differs. A version-only change reaches only `hook:startup`: the two Claude files in Claude, the Codex manifest in Codex. `.agents/plugins/marketplace.json` has no version and always takes the shared expansion.
 
 Asset ownership is consumer-driven, not blanket shared ownership. Inspect the exact candidate's plugin manifests. At present, `plugins/pstack/assets/logo.png` is referenced only by `plugins/pstack/.codex-plugin/plugin.json`, so a logo-only change selects the installed Codex asset surface and does not invent a Claude exercise. New shipped assets must be added to `assets` and must have a real manifest consumer; missing, ambiguous, or unknown consumption fails closed.
