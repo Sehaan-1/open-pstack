@@ -128,12 +128,14 @@ That is the main workflow. The other skills are there when poteto-mode needs the
 | `interrogate` | You want different models to try to break a design or diff. |
 | `create-verification-skill` | Your project has no repeatable way for an agent to prove real behavior. |
 | `maintain-verification-skill` | The project's verification instructions no longer match the product. |
+| `create-formal-verification-skill` | A race, an invariant, or another property needs a proof that tests rarely reach. |
+| `maintain-formal-verification-skill` | The code a formal verification covers has changed, and you need to know whether a failure is drift or a bug. |
 | `babysit` | A pull request needs CI failures and review comments handled until it is ready. |
 | `reflect` | A hard task is finished and its lessons should improve the next run. |
 | `correct` | Agents keep making the same mistake in a repository and you want a check that stops it. |
 | `poteto-help` | You want to know which skill, playbook, or principle fits a question. |
 | `in-your-own-words` | You want the agent to restate your goal and the problem before it starts. |
-| `sharpen` | You want a task approached the way a top expert would, aimed at what you are really after, without overspecifying it. |
+| `sharpen` | You want a prompt rewritten deeper, not bigger, before you send it. It returns the rewritten prompt and does not do the task. |
 
 Plugin skills include `pstack:` in their name. In Claude Code, invoke a native skill such as `/pstack:architect`. In Codex, ask for the skill, such as `Use pstack:architect for this design.` See the [technical reference](docs/reference.md) for the full list.
 
@@ -170,11 +172,13 @@ This repository also keeps:
 
 ## Staying close to Lauren's pstack
 
-Open Pstack 1.15.0 tracks pstack 0.15.25 at Cursor commit [`99743e9c151c8537cbbf1f98bb38f34ef3368453`](https://github.com/cursor/plugins/commit/99743e9c151c8537cbbf1f98bb38f34ef3368453).
+Open Pstack 1.16.0 tracks pstack 0.15.29 at Cursor commit [`88d47514b82e7c44f00f2b2a72ff6dd12158038c`](https://github.com/cursor/plugins/commit/88d47514b82e7c44f00f2b2a72ff6dd12158038c).
 
 The two projects have separate version numbers. The pstack version identifies Lauren's upstream content. The Open Pstack version identifies the Claude Code and Codex package built from it.
 
 In this repository, “upstream” means Lauren's original pstack. Open Pstack does not promise instant updates. It records the exact version it follows, reviews new changes in order, and changes only what Claude Code and Codex require. New pstack behavior belongs in Lauren's project first whenever possible.
+
+Cursor's pstack now installs in Claude Code as `pstack@cursor-plugins`, with Claude models only and no Codex. Install only one of the two, because both use the `pstack:` prefix.
 
 ## Contributing
 
