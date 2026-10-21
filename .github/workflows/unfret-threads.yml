@@ -5,6 +5,8 @@ on:
     types: [submitted]
 
 permissions:
+  # GitHub refuses resolveReviewThread to the Actions token without contents: write.
+  contents: write
   pull-requests: write
 
 jobs:
