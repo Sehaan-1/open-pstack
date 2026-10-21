@@ -1,6 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import { join } from "node:path";
 import { main, parseArgs } from "./cli.ts";
+import { access } from "./registry/contract.ts";
 
 function argv(extra: readonly string[] = []): string[] {
   return [
@@ -43,9 +44,9 @@ describe("runner CLI parsing", () => {
 
   it("defaults a writer to the bounded sandbox and passes an explicit full-access opt-in", () => {
     const writer = argv().map((value) => (value === "read-only" ? "isolated-write" : value));
-    expect(parseArgs(writer)?.access).toEqual({ mode: "isolated-write", sandbox: "bounded" });
+    expect(parseArgs(writer)?.access).toEqual(access("isolated-write"));
     expect(parseArgs([...writer, "--writer-sandbox", "full-access"])?.access)
-      .toEqual({ mode: "isolated-write", sandbox: "full-access" });
+      .toEqual(access("isolated-write", "full-access"));
     expect(() => parseArgs(argv(["--writer-sandbox", "full-access"])))
       .toThrow("writer sandbox full-access requires mode isolated-write");
   });
