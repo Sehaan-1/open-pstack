@@ -1,0 +1,42 @@
+name: Unfret threads
+
+on:
+  pull_request_review:
+    types: [submitted]
+
+permissions:
+  pull-requests: write
+
+jobs:
+  resolve:
+    if: github.event.review.user.login == 'unfret-eal[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Resolve the threads Unfret started
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          gh api graphql --paginate \
+            -f owner="${REPOSITORY%/*}" -f name="${REPOSITORY#*/}" -F number="$PR" \
+            -f query='query($owner: String!, $name: String!, $number: Int!, $endCursor: String) {
+              repository(owner: $owner, name: $name) {
+                pullRequest(number: $number) {
+                  reviewThreads(first: 100, after: $endCursor) {
+                    pageInfo { hasNextPage endCursor }
+                    nodes { id isResolved comments(first: 1) { nodes { author { login } } } }
+                  }
+                }
+              }
+            }' \
+            --jq '.data.repository.pullRequest.reviewThreads.nodes[]
+              | select(.isResolved | not)
+              | select(.comments.nodes[0].author.login == "unfret-eal")
+              | .id' |
+            while read -r thread; do
+              gh api graphql -f thread="$thread" \
+                -f query='mutation($thread: ID!) { resolveReviewThread(input: {threadId: $thread}) { thread { id } } }' \
+                > /dev/null
+            done

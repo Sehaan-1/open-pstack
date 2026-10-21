@@ -8,8 +8,8 @@ queue_rules:
     merge_method: merge
     queue_conditions:
       - -draft
+      - -label = hold
       - check-success=verify
-      - check-success=Unfret
       - check-success=live-gate
       - "#review-threads-unresolved = 0"
     merge_conditions: []
@@ -21,15 +21,22 @@ merge_protections_settings:
 
 merge_protections:
   - name: Queue ready pull requests
-    description: Automatically queue non-draft pull requests targeting main after verify, Unfret, and live-gate pass on the head and every review thread is resolved.
+    description: Automatically queue non-draft pull requests targeting main without a hold label after verify and live-gate pass on the head and every review thread is resolved.
     if:
       - base = main
     success_conditions:
       - -draft
+      - -label = hold
       - check-success=verify
-      - check-success=Unfret
       - check-success=live-gate
       - "#review-threads-unresolved = 0"
+  - name: Unfret on risky paths
+    description: Pull requests that touch .github/ or the Mergify config also wait for Unfret.
+    if:
+      - base = main
+      - files ~= ^(\.github/|\.mergify(\.ya?ml\Z|/))
+    success_conditions:
+      - check-success = @unfret-eal/Unfret
 
 commands_restrictions:
   requeue:
