@@ -3,7 +3,6 @@ name: pstack-sonnet-max
 description: Native Claude lane for pstack roles configured as claude:sonnet@max.
 model: sonnet
 effort: max
-background: true
 disallowedTools: Agent, Task
 ---
 

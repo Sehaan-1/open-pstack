@@ -3,7 +3,6 @@ name: pstack-haiku-5-5-low
 description: Native Claude lane for pstack roles configured as claude:claude-haiku-5-5@low.
 model: claude-haiku-5-5
 effort: low
-background: true
 disallowedTools: Agent, Task
 ---
 

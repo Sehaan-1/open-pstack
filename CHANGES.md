@@ -7,6 +7,8 @@ This port applies the Cursor → Claude Code substitutions in skill bodies. Earl
 
 **Claude Haiku 5.5 lanes.** The model catalog registers `claude:claude-haiku-5-5` as an exact pin, with five native agents, `pstack-haiku-5-5-low` to `pstack-haiku-5-5-max`, and efforts `low` to `max`. On a Claude Code parent an unregistered Claude model is a dropout, so this is the first way to run Haiku lanes there. The pin is optional; no role default changes. The catalog registers no `haiku` alias, because Claude Code resolves that alias to Haiku 4.5, which has no effort setting, on Bedrock, Vertex and Foundry (#223, by @jwerby).
 
+**Claude Code subagents wait in the foreground.** The generated `pstack-<family>-<effort>` agents no longer set `background: true`, which Claude Code honored over a caller's `run_in_background: false` (#233). `references/codex-tools.md` has a Waits on Claude Code section: the main session runs long commands and fan-outs in the background, and a subagent dispatches the lanes it needs in the foreground, runs `watch-pr` in the foreground with `--timeout 240` instead of `/loop`, and waits on a background task in one bounded foreground call (#232). Provider dispatch, poteto-mode, babysit step 6 and `docs/reference.md` point to that section.
+
 ## 1.15.0 runs Devin, agy and dsh lanes in any repository
 
 Open Pstack 1.15.0 keeps the Cursor pstack 0.15.25 sync. It ships PR #215, merged after 1.14.0. Default roles and panels are unchanged.

@@ -166,7 +166,7 @@ The table uses the short upstream names. Claude Code exposes each native skill w
 
 `comment-sicko` is the read-only comment reviewer the `no-comments` skill spawns. Upstream names it `Comment Sicko`; the port renames it to `comment-sicko` so the name is a valid `subagent_type`. Invoke it through `/no-comments`, not directly.
 
-Each Claude family in the [model catalog](../plugins/pstack/skills/poteto-mode/references/model-catalog.md) ships a generated agent at each selectable effort. Names are `pstack-<family>-<effort>`. `pstack-fable-max` and `pstack-opus-xhigh` remain. Each file selects the family's model, a rolling alias or an exact pin, and the requested effort, runs in the background, and denies nested Agent/Task dispatch. pstack dispatches them from provider-qualified descriptors; they are not user-facing workflows.
+Each Claude family in the [model catalog](../plugins/pstack/skills/poteto-mode/references/model-catalog.md) ships a generated agent at each selectable effort. Names are `pstack-<family>-<effort>`. `pstack-fable-max` and `pstack-opus-xhigh` remain. Each file selects the family's model, a rolling alias or an exact pin, and the requested effort, and denies nested Agent/Task dispatch. The caller chooses foreground or background as [Waits on Claude Code](../plugins/pstack/skills/poteto-mode/references/codex-tools.md#waits-on-claude-code) says. pstack dispatches them from provider-qualified descriptors; they are not user-facing workflows.
 
 ## Differences from upstream
 
@@ -222,7 +222,7 @@ The earlier port collapsed panels to Claude-only models. The bundled runner rest
 - **The Sol removal** (upstream `df58112`, pstack 0.15.15) drops Sol from every default and moves Opus to `xhigh`. Open Pstack keeps its model defaults and three-model panels, so none of that commit is applied.
 - **Merging without a rebase after trunk moves** (upstream `23e4138`, pstack 0.15.6). Autopilot-full would merge a green head with an unchanged patch ID when `git merge-tree` is clean and trunk touched none of the PR's paths. Those checks miss a trunk change that breaks the PR's code from another file, so the port keeps re-verifying after any trunk move. `UPSTREAM.md` records the reason.
 - **Sticky mode** (upstream `#144`) — Cursor-only `mode`/`icon`/`color`/`reminder` frontmatter with no Claude Code equivalent. The port's 0.9.5 SessionStart hook is the analog and already carries the non-trivial / trivial / opt-out logic.
-- **`is_background: true` on `poteto-agent`** (upstream `99559f2`) — Cursor names this key differently. Claude-native frontier definitions use `background: true`; ad-hoc `poteto-agent` calls remain background dispatches at the call site.
+- **`is_background: true` on `poteto-agent`** (upstream `99559f2`) — Cursor names this key differently. No pstack agent definition sets `background`; callers choose foreground or background as [Waits on Claude Code](../plugins/pstack/skills/poteto-mode/references/codex-tools.md#waits-on-claude-code) says.
 - **`cursor-team-kit` beyond the seven imported skills** — the rest either duplicate Claude Code built-ins (`verify-this` → the `verify` skill and built-in verification discipline; `check-compiler-errors` → LSP diagnostics; `control-cli`/`control-ui` → `run`/`verify`, already the substitution targets) or overlap skills this port ships (`loop-on-ci`, `review-and-ship`, `weekly-review` vs `babysit`, `fix-ci`, `make-pr-easy-to-review`, `what-did-i-get-done`). `pr-review-canvas` is Cursor-UI-specific.
 
 ### Forking note

@@ -249,13 +249,14 @@ for (const harness of ['claude', 'codex'] as const) {
   });
 }
 
-test('the native-agents case needs each new agent dispatched, its child run, and its own nonce written', async () => {
+test('the native-agents case needs each new agent dispatched, its child run, its own nonce written, and its report inline', async () => {
   const f = await fixture('claude'), c = recipe('catalog', 'claude').find(c => c.id === 'native-agents')!;
   expect(recipe('catalog', 'codex').some(c => c.id === 'native-agents')).toBe(false);
   await c.prepare!(f);
   const agents = ['pstack-sonnet-max', 'pstack-opus-5-5-max', 'pstack-haiku-5-5-max'];
+  const nonces = Object.fromEntries(await Promise.all(agents.map(async agent => [agent, (await readFile(join(f.dir, `${agent}.nonce`), 'utf8')).trim()])));
   const tools = (names: string[], children = names) => [
-    ...names.map((agent, i) => ({ name: 'Agent', id: `a${i}`, input: { subagent_type: `pstack:${agent}` }, parent: null, failed: false })),
+    ...names.map((agent, i) => ({ name: 'Agent', id: `a${i}`, input: { subagent_type: `pstack:${agent}` }, parent: null, failed: false, result: nonces[agent] })),
     ...children.map(agent => ({ name: 'Read', id: `r-${agent}`, input: {}, parent: `a${names.indexOf(agent)}`, failed: false })),
   ];
   const run = (names: string[], children?: string[]): SessionRecord => ({ ...record('claude', 'pstack:poteto-mode'), tools: tools(names, children) });
@@ -267,6 +268,9 @@ test('the native-agents case needs each new agent dispatched, its child run, and
   const overridden = run(agents);
   overridden.tools[1]!.input.model = 'opus';
   await expect(c.assert(overridden, f)).rejects.toThrow('agent-not-dispatched:pstack:pstack-opus-5-5-max');
+  const launched = run(agents);
+  launched.tools[1]!.result = 'Async agent launched successfully.\nagentId: a1 (internal ID)';
+  await expect(c.assert(launched, f)).rejects.toThrow('report-not-inline:pstack:pstack-opus-5-5-max');
   await writeFile(join(f.dir, 'pstack-sonnet-max.out'), 'guess\n');
   await expect(c.assert(run(agents), f)).rejects.toThrow('nonce-mismatch:pstack:pstack-sonnet-max');
 });

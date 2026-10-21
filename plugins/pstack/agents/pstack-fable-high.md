@@ -3,7 +3,6 @@ name: pstack-fable-high
 description: Native Claude lane for pstack roles configured as claude:fable@high.
 model: fable
 effort: high
-background: true
 disallowedTools: Agent, Task
 ---
 

@@ -3,7 +3,6 @@ name: pstack-sonnet-xhigh
 description: Native Claude lane for pstack roles configured as claude:sonnet@xhigh.
 model: sonnet
 effort: xhigh
-background: true
 disallowedTools: Agent, Task
 ---
 

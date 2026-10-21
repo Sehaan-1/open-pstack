@@ -3,7 +3,6 @@ name: pstack-haiku-5-5-max
 description: Native Claude lane for pstack roles configured as claude:claude-haiku-5-5@max.
 model: claude-haiku-5-5
 effort: max
-background: true
 disallowedTools: Agent, Task
 ---
 

@@ -174,7 +174,6 @@ export function renderNativeAgents(registry: Registry): readonly GeneratedFile[]
           `description: Native Claude lane for pstack roles configured as ${family.provider}:${family.model}@${effort}.`,
           `model: ${family.model}`,
           `effort: ${effort}`,
-          "background: true",
           "disallowedTools: Agent, Task",
           "---",
           "",

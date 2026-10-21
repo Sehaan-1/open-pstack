@@ -36,7 +36,7 @@ The catalog's [route table](model-catalog.md#routes) gives each provider's route
 
 Native dispatch avoids a second CLI startup and its base context.
 
-- Claude Code: match the descriptor's `(provider, model)` to one model-matrix row, then dispatch it through `pstack-<family>-<effort>` using that row's family and the descriptor's effort. Those definitions select the row's model, requested effort, and `background: true`. `pstack-fable-max` and `pstack-opus-xhigh` remain in that set. Pass the complete task, grounding paths, access mode, and unique output location in the `Agent` prompt. Retain the task handle and drain it only after fan-out.
+- Claude Code: match the descriptor's `(provider, model)` to one model-matrix row, then dispatch it through `pstack-<family>-<effort>` using that row's family and the descriptor's effort. Those definitions select the row's model and requested effort. `pstack-fable-max` and `pstack-opus-xhigh` remain in that set. Pass the complete task, grounding paths, access mode, and unique output location in the `Agent` prompt. Dispatch and wait as [Waits on Claude Code](codex-tools.md#waits-on-claude-code) says.
 - Codex: call `spawn_agent` with the descriptor's model and `reasoning_effort`, the complete task, grounding paths, access mode, and unique output location. Use an isolated worktree for a writer. Codex subagents already run concurrently.
 
 Do not send a same-provider descriptor to the external runner. It rejects that call because the native route is cheaper and already available.
@@ -78,7 +78,7 @@ A model sheet may hold one setting line that is not a role: `codex writer sandbo
 
 The parent invocation must itself be resumable background work:
 
-- Claude Code: call the launcher through a Bash tool invocation with `run_in_background: true` and retain its task ID. A foreground Bash tool call has an automatic ten-minute ceiling even when the runner's own timeout is longer. Shelling out with `&` and losing the task handle is not equivalent.
+- Claude Code: call the launcher through a Bash tool invocation with `run_in_background: true` and retain its task ID. A foreground Bash tool call has an automatic ten-minute ceiling even when the runner's own timeout is longer. Shelling out with `&` and losing the task handle is not equivalent. A subagent that must wait on the launcher follows [Waits on Claude Code](codex-tools.md#waits-on-claude-code).
 - Codex: run the launcher in a persistent exec session that returns a session ID, then wait or poll that handle. Do not hold one foreground tool call open for the model's full runtime.
 
 Start the background process, continue launching the other lanes, then drain their handles. Native and external lanes belong in the same fan-out phase.
