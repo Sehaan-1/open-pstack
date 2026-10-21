@@ -81,6 +81,16 @@ function loaded(record: SessionRecord, skill: string): string {
   return 'skill-loaded';
 }
 
+function ended(record: SessionRecord, word: string, failure: string): string {
+  if (record.reply.trim() !== word) throw new Error(failure);
+  return `ended:${word}`;
+}
+
+async function noSkillDirectory(f: Fixture, failure: string): Promise<string> {
+  for (const skills of ['.claude/skills', '.agents/skills']) if (await lstat(join(f.dir, skills)).then(() => true, () => false)) throw new Error(`${failure}:${skills}`);
+  return 'no-skill-directory';
+}
+
 async function written(record: SessionRecord, path: string): Promise<string> {
   const info = await lstat(path).catch(() => undefined);
   if (!info?.isFile() || !info.size || info.mtimeMs < record.started) throw new Error(`fixture-file-missing:${basename(path)}`);
@@ -406,20 +416,41 @@ const setup: Case[] = [{
   id: 'first-run',
   codexSandbox: 'danger-full-access',
   claudePermission: 'bypassPermissions',
-  async prepare(f) {
-    await rm(join(f.configHome, 'pstack-models.md'), { force: true });
-    if (f.harness === 'codex') await rm(join(f.configHome, 'AGENTS.md'), { force: true });
-  },
-  prompt: f => `${invoke(f.harness, 'setup-pstack', `Use these answers and ask nothing else. Keep the first-run role assignments and every proposed effort. I confirm every write. Write the setup report to ${join(f.dir, 'result.md')}.`)} Do not push, post, or contact GitHub.`,
+  prepare: unconfigured,
+  prompt: firstRunPrompt,
   async assert(record, f) {
     const sheet = join(f.configHome, 'pstack-models.md'), assertions = [loaded(record, 'pstack:setup-pstack'), await written(record, sheet)];
     const text = await readFile(sheet, 'utf8');
     if (!Bun.deepEquals(roleLines(text), [...(await readCatalog(f.location)).defaults].map(([role, lanes]) => `${role}: ${lanes.join(', ')}`))) throw new Error('first-run-not-role-defaults');
     bounded(text);
-    for (const skills of ['.claude/skills', '.agents/skills']) if (await lstat(join(f.dir, skills)).then(() => true, () => false)) throw new Error(`first-run-offer-accepted:${skills}`);
-    return { assertions: [...assertions, ...await mirrored(f, sheet), 'sheet:role-defaults', `setting:${BOUNDED_SETTING}`, 'offers-declined'], files: [sheet] };
+    const declined = await noSkillDirectory(f, 'first-run-offer-accepted');
+    return { assertions: [...assertions, ...await mirrored(f, sheet), 'sheet:role-defaults', `setting:${BOUNDED_SETTING}`, declined], files: [sheet] };
+  },
+}, {
+  id: 'accept-formal-offer',
+  codexSandbox: 'danger-full-access',
+  claudePermission: 'bypassPermissions',
+  prepare: unconfigured,
+  prompt: f => `${firstRunPrompt(f)} Decline the verification-skill offer and accept the formal verification offer. When the formal verification skill loads, stop at once without doing its work and reply with exactly ACCEPT-ROUTED as your final message.`,
+  async assert(record) {
+    const assertions = [loaded(record, 'pstack:setup-pstack')];
+    if (!record.skills.slice(record.skills.indexOf('pstack:setup-pstack') + 1).some(isFormalCreator)) throw new Error('skill-not-routed:create-formal-verification-skill');
+    return { assertions: [...assertions, 'routed:create-formal-verification-skill', ended(record, 'ACCEPT-ROUTED', 'accept-formal-offer-did-not-finish')], files: [] };
   },
 }];
+
+const DECLINE_EXEMPT = new Set(['keep-setting', 'accept-formal-offer']);
+const isFormalCreator = (skill: string): boolean =>
+  skill === 'pstack:create-formal-verification-skill' || skill.endsWith('/create-formal-verification-skill/SKILL.md');
+
+async function unconfigured(f: Fixture): Promise<void> {
+  await rm(join(f.configHome, 'pstack-models.md'), { force: true });
+  if (f.harness === 'codex') await rm(join(f.configHome, 'AGENTS.md'), { force: true });
+}
+
+function firstRunPrompt(f: Fixture): string {
+  return `${invoke(f.harness, 'setup-pstack', `Use these answers and ask nothing else. Keep the first-run role assignments and every proposed effort. I confirm every write. Write the setup report to ${join(f.dir, 'result.md')}.`)} Do not push, post, or contact GitHub.`;
+}
 
 function bounded(text: string): void {
   if (!Bun.deepEquals(settingLines(text), [BOUNDED_SETTING])) throw new Error('setting-not-bounded');
@@ -573,13 +604,14 @@ function keepSetting(): Case {
         await utimes(mirror, prepared, prepared);
       }
     },
-    prompt: f => `${invoke(f.harness, 'setup-pstack', `Write the setup report to ${join(f.dir, 'result.md')}.`)} Do not push, post, or contact GitHub.`,
+    prompt: f => `${invoke(f.harness, 'setup-pstack', `Write the setup report to ${join(f.dir, 'result.md')}.`)} Do not push, post, or contact GitHub. Reply with exactly SETUP-DONE as your final message.`,
     async assert(record, f) {
       const sheet = join(f.configHome, 'pstack-models.md'), assertions = [loaded(record, 'pstack:setup-pstack'), await written(record, sheet)];
       if (f.harness === 'claude' && record.tools.some(t => t.name === 'AskUserQuestion')) throw new Error('keep-setting-asked');
       if (await readFile(sheet, 'utf8') !== sheetBytes) throw new Error('keep-setting-sheet-changed');
       if (f.harness === 'codex' && await readFile(join(f.configHome, 'AGENTS.md'), 'utf8').catch(() => '') !== mirrorBytes) throw new Error('keep-setting-mirror-changed');
-      return { assertions: [...assertions, ...(f.harness === 'claude' ? ['no-question'] : []), 'sheet-unchanged', ...(f.harness === 'codex' ? ['codex-mirror-unchanged'] : []), `setting:${FULL_ACCESS_SETTING}`], files: [sheet] };
+      const quiet = [await noSkillDirectory(f, 'keep-setting-offer-accepted'), ended(record, 'SETUP-DONE', 'keep-setting-did-not-finish')];
+      return { assertions: [...assertions, ...(f.harness === 'claude' ? ['no-askuserquestion-attempt'] : []), 'sheet-unchanged', ...(f.harness === 'codex' ? ['codex-mirror-unchanged'] : []), ...quiet, `setting:${FULL_ACCESS_SETTING}`], files: [sheet] };
     },
   };
 }
@@ -693,7 +725,7 @@ export function recipe(feature: string, harness: Harness, routes: string[] = [])
   if (feature === 'project-skill') return [projectSkill];
   if (feature === 'hook:startup') return [startupHook];
   if (feature === 'runner') return runner(harness, routes);
-  if (feature === 'setup' || feature === 'skill-invocation:setup-pstack') return setup.map(c => ({ ...c, prompt: f => `${c.prompt(f)} ${DECLINE_OFFERS}` }));
+  if (feature === 'setup' || feature === 'skill-invocation:setup-pstack') return setup.map(c => DECLINE_EXEMPT.has(c.id) ? c : { ...c, prompt: f => `${c.prompt(f)} ${DECLINE_OFFERS}` });
   if (feature === 'catalog') return catalog(harness);
   if (feature === 'shipped-tools') return [shippedTools];
   if (feature === 'agent-preload:poteto-agent' && harness === 'claude') return [agentPreload];

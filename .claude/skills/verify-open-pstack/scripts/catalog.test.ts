@@ -16,7 +16,7 @@ async function fixture(harness: Harness): Promise<Fixture> {
   return { harness, dir, workspace, location, configHome: dir, run: command };
 }
 const record = (harness: Harness, skill: string): SessionRecord =>
-  ({ harness, exitCode: 0, started: Date.now() - 1000, skills: [skill], commands: [], tools: [], context: [] });
+  ({ harness, exitCode: 0, started: Date.now() - 1000, skills: [skill], commands: [], tools: [], context: [], reply: '' });
 const sheet = async (path: string): Promise<Map<string, string[]>> => new Map((await readFile(path, 'utf8')).split('\n')
   .filter(line => /^[a-z][^:]*: \S/.test(line)).map((line): [string, string[]] => [line.slice(0, line.indexOf(': ')), line.slice(line.indexOf(': ') + 2).split(', ')]));
 const setupCase = (id: string): Case => recipe('setup', 'claude').find(c => c.id === id)!;
@@ -287,7 +287,7 @@ test('the first-run case requires a sheet equal to the catalog role defaults', a
   await writeFile(path, written);
   await expect(c.assert(record('codex', 'pstack:setup-pstack'), f)).rejects.toThrow('codex-mirror-mismatch');
   await mirror(f, written);
-  expect((await c.assert(record('codex', 'pstack:setup-pstack'), f)).assertions).toContain('sheet:role-defaults');
+  expect((await c.assert(record('codex', 'pstack:setup-pstack'), f)).assertions).toEqual(expect.arrayContaining(['sheet:role-defaults', 'no-skill-directory']));
   await rejectsUnbounded(c, f, written);
   await writeFile(path, `# pstack model configuration\n\n${lines.slice(1).join('\n')}\n`);
   await expect(c.assert(record('codex', 'pstack:setup-pstack'), f)).rejects.toThrow('first-run-not-role-defaults');
@@ -347,7 +347,7 @@ test('the full-access writer case quotes each browser argument for sh and encode
 });
 
 for (const harness of ['claude', 'codex'] as const) {
-  test(`${harness}: the keep-setting case gives no answers and requires an unchanged sheet and mirror, with no question in Claude`, async () => {
+  test(`${harness}: the keep-setting case gives no answers and requires an unchanged sheet and mirror, SETUP-DONE, and no question in Claude`, async () => {
     const f = await fixture(harness), c = recipe('setup', harness).find(c => c.id === 'keep-setting')!, installed = await readCatalog(location);
     await writeFile(join(f.dir, 'AGENTS.md'), 'mirror\n');
     await c.prepare!(f);
@@ -356,22 +356,33 @@ for (const harness of ['claude', 'codex'] as const) {
     const agents = harness === 'codex' ? `<!-- pstack:models:begin -->\n${prepared}<!-- pstack:models:end -->\n` : 'mirror\n';
     expect(await readFile(join(f.dir, 'AGENTS.md'), 'utf8')).toBe(agents);
     expect(c.prompt(f)).not.toContain('Use these answers');
+    expect(c.prompt(f)).not.toContain('decline');
+    expect(c.prompt(f)).toEndWith('Reply with exactly SETUP-DONE as your final message.');
     await writeFile(path, prepared);
-    expect((await c.assert(record(harness, 'pstack:setup-pstack'), f)).assertions).toEqual(['skill-loaded', 'file:pstack-models.md', ...(harness === 'claude' ? ['no-question'] : []), 'sheet-unchanged',
-      ...(harness === 'codex' ? ['codex-mirror-unchanged'] : []), 'setting:codex writer sandbox: full-access']);
+    const done = (): SessionRecord => ({ ...record(harness, 'pstack:setup-pstack'), reply: '\nSETUP-DONE\n' });
+    expect((await c.assert(done(), f)).assertions).toEqual(['skill-loaded', 'file:pstack-models.md', ...(harness === 'claude' ? ['no-askuserquestion-attempt'] : []), 'sheet-unchanged',
+      ...(harness === 'codex' ? ['codex-mirror-unchanged'] : []), 'no-skill-directory', 'ended:SETUP-DONE', 'setting:codex writer sandbox: full-access']);
 
-    const asked = record(harness, 'pstack:setup-pstack');
+    for (const reply of ['Want a project-local verification skill? I can generate one with /create-verification-skill.', '']) {
+      await expect(c.assert({ ...done(), reply }, f)).rejects.toThrow('keep-setting-did-not-finish');
+    }
+    const asked = done();
     asked.tools.push({ name: 'AskUserQuestion', id: 'q', input: {}, parent: null, failed: true });
     if (harness === 'claude') await expect(c.assert(asked, f)).rejects.toThrow('keep-setting-asked');
-    else expect((await c.assert(asked, f)).assertions).not.toContain('no-question');
+    else expect((await c.assert(asked, f)).assertions).not.toContain('no-askuserquestion-attempt');
+    for (const skills of ['.claude/skills', '.agents/skills']) {
+      await mkdir(join(f.dir, skills), { recursive: true });
+      await expect(c.assert(done(), f)).rejects.toThrow(`keep-setting-offer-accepted:${skills}`);
+      await rm(join(f.dir, skills.split('/')[0]!), { recursive: true });
+    }
     for (const wrong of [prepared.replace(FULL_ACCESS, ''), prepared.replace(FULL_ACCESS, BOUNDED), prepared.replace(/\nbug-fix: [^\n]*/, ''), `${prepared}\n`]) {
       await writeFile(path, wrong);
-      await expect(c.assert(record(harness, 'pstack:setup-pstack'), f)).rejects.toThrow('keep-setting-sheet-changed');
+      await expect(c.assert(done(), f)).rejects.toThrow('keep-setting-sheet-changed');
     }
     await writeFile(path, prepared);
     if (harness === 'codex') {
       await writeFile(join(f.dir, 'AGENTS.md'), `notes\n${agents}`);
-      await expect(c.assert(record(harness, 'pstack:setup-pstack'), f)).rejects.toThrow('keep-setting-mirror-changed');
+      await expect(c.assert(done(), f)).rejects.toThrow('keep-setting-mirror-changed');
     }
   });
 
@@ -382,9 +393,32 @@ for (const harness of ['claude', 'codex'] as const) {
     await expect(c.assert({ ...record(harness, 'pstack:setup-pstack'), started }, f)).rejects.toThrow('fixture-file-missing:pstack-models.md');
   });
 
-  test(`${harness}: every setup prompt declines both verification offers`, async () => {
-    const f = await fixture(harness);
-    for (const c of recipe('setup', harness)) expect(c.prompt(f)).toEndWith('If setup offers to generate a verification skill or a formal verification skill, decline both.');
+  test(`${harness}: every setup prompt but keep-setting and accept-formal-offer declines both verification offers`, async () => {
+    const f = await fixture(harness), decline = 'If setup offers to generate a verification skill or a formal verification skill, decline both.';
+    const cases = recipe('setup', harness);
+    expect(cases.map(c => c.id)).toEqual(['configure', 'consume', 'keep-predecessor', 'new-families', 'read-only-provider', 'writer-refusal', 'keep-setting', 'first-run', 'accept-formal-offer']);
+    for (const c of cases) {
+      if (['keep-setting', 'accept-formal-offer'].includes(c.id)) expect(c.prompt(f)).not.toContain(decline);
+      else expect(c.prompt(f)).toEndWith(decline);
+    }
+  });
+
+  test(`${harness}: the accept-formal-offer case requires setup to load the formal verification creator and end with ACCEPT-ROUTED`, async () => {
+    const f = await fixture(harness), c = recipe('setup', harness).find(c => c.id === 'accept-formal-offer')!;
+    await writeFile(join(f.dir, 'pstack-models.md'), 'stale\n'); await writeFile(join(f.dir, 'AGENTS.md'), 'mirror\n');
+    await c.prepare!(f);
+    await expect(readFile(join(f.dir, 'pstack-models.md'))).rejects.toThrow();
+    if (harness === 'codex') await expect(readFile(join(f.dir, 'AGENTS.md'))).rejects.toThrow();
+    expect(c.prompt(f)).toContain('Keep the first-run role assignments and every proposed effort. I confirm every write.');
+    expect(c.prompt(f)).toEndWith('Decline the verification-skill offer and accept the formal verification offer. When the formal verification skill loads, stop at once without doing its work and reply with exactly ACCEPT-ROUTED as your final message.');
+    const creator = harness === 'claude' ? 'pstack:create-formal-verification-skill' : '/plugins/pstack/skills/create-formal-verification-skill/SKILL.md';
+    const routed = (skills: string[], reply = 'ACCEPT-ROUTED'): SessionRecord => ({ ...record(harness, 'pstack:setup-pstack'), skills, reply });
+    expect((await c.assert(routed(['pstack:setup-pstack', creator]), f)).assertions)
+      .toEqual(['skill-loaded', 'routed:create-formal-verification-skill', 'ended:ACCEPT-ROUTED']);
+    for (const skills of [['pstack:setup-pstack'], [creator, 'pstack:setup-pstack'], ['pstack:setup-pstack', 'pstack:create-verification-skill']]) {
+      await expect(c.assert(routed(skills), f)).rejects.toThrow('skill-not-routed:create-formal-verification-skill');
+    }
+    await expect(c.assert(routed(['pstack:setup-pstack', creator], 'Want a formal verification skill?'), f)).rejects.toThrow('accept-formal-offer-did-not-finish');
   });
 }
 

@@ -37,7 +37,7 @@ test('the runner recipe adds one linked-worktree writer case for a Codex parent 
   const writer = recipe('runner', 'codex')[1]!;
   await writer.prepare!(f);
   const record: SessionRecord = { harness: 'codex', exitCode: 0, started: Date.now() - 1000, skills: ['pstack:poteto-mode'], tools: [],
-    commands: [await launch(f, writer.prompt(f))], context: [] };
+    commands: [await launch(f, writer.prompt(f))], context: [], reply: '' };
 
   expect((await writer.assert(record, f)).assertions).toEqual(['runner-ran', 'receipt-complete', 'shared-git-denied', 'file:WRITTEN.md']);
 

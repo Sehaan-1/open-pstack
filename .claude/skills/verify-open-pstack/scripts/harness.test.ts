@@ -336,11 +336,27 @@ describe('headless recipes', () => {
       { type: 'item.completed', item: { id: 'item_3', type: 'agent_message', text: 'I ran it.' } },
     ].map(event => JSON.stringify(event)).join('\n');
     const record = parseSession('codex', stream, 0, 0);
+    expect(record.reply).toBe('I ran it.');
     expect(record.commands).toEqual(['true']);
     expect(record.tools).toEqual([
       { name: 'command', id: 'item_1', input: { command: 'true' }, result: 'out\n', parent: null, failed: false },
       { name: 'command', id: 'item_2', input: { command: 'false' }, result: '', parent: null, failed: true },
     ]);
+  });
+  test('each harness keeps the final assistant text as the reply, or empty text when there is none', () => {
+    expect(parseSession('claude', lines([
+      { type: 'result', subtype: 'success', is_error: false, result: 'Early.' },
+      { type: 'assistant', message: { content: [{ type: 'text', text: 'Not the result.' }] } },
+      { type: 'result', subtype: 'success', is_error: false, result: 'SETUP-DONE' },
+    ]), 0, 0).reply).toBe('SETUP-DONE');
+    expect(parseSession('claude', lines([{ type: 'assistant', message: { content: [{ type: 'text', text: 'No result.' }] } }]), 0, 0).reply).toBe('');
+    expect(parseSession('codex', lines([
+      { type: 'item.completed', item: { id: 'item_0', type: 'agent_message', text: 'First.' } },
+      { type: 'item.completed', item: { id: 'item_1', type: 'agent_message', text: 'ACCEPT-ROUTED' } },
+      { type: 'item.completed', item: { id: 'item_2', type: 'command_execution', command: 'true', aggregated_output: '', exit_code: 0 } },
+      { type: 'item.started', item: { id: 'item_3', type: 'agent_message', text: 'Unfinished.' } },
+    ]), 0, 0).reply).toBe('ACCEPT-ROUTED');
+    expect(parseSession('codex', lines([{ type: 'item.completed', item: { id: 'item_0', type: 'command_execution', command: 'true', exit_code: 0 } }]), 0, 0).reply).toBe('');
   });
   test('missing or unsupported recipes fail before any session starts', async () => {
     const { root, installation } = await candidate('codex');
