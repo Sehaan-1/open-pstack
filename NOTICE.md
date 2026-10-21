@@ -39,7 +39,7 @@ Summary of structural changes:
 - `plugins/pstack/skills/poteto-mode/scripts/` is vendored from upstream (`watch-pr`, `orch`, `bootstrap.ts`, `worktree-audit.sh`, `package.json`, `bun.lock`) with these port edits: `worktree-audit.sh` reads `~/.claude/projects/` instead of Cursor's transcript directory and warns when `jq` or `rg` is missing (their absence silently blanks the columns the prune decision reads), the private workspace package is named `@open-pstack/poteto-mode-tools`, `bootstrap.ts` rejects Node before it reads Bun-only APIs, and `package.json` includes the port-authored tests in `bun run test`. `check-plan.mjs` is the Cursor 0.14.3 checker adapted for the shared Claude Code and Codex skeleton. `bootstrap.test.ts` and `check-plan.test.ts` are authored for this port. `check-plan.test.ts` also carries the fence cases from upstream's `check-plan.test.ts` at 0.15.20, run against the extracted plan skeleton.
 - `plugins/pstack/agents/comment-sicko.md` is upstream's `Comment Sicko` agent, renamed to `comment-sicko` so the name works as a Claude Code `subagent_type`. The body is verbatim.
 - `plugins/pstack/agents/poteto-agent.md` keeps the upstream prompt and adds Claude Code `skills` frontmatter so the isolated subagent preloads `pstack:poteto-mode`.
-- Claude-native Fable and Opus lanes are port-authored agent definitions. They select the rolling family alias plus requested effort for every selectable Claude-native pair in the model catalog, and `registry/render.ts` generates them from the runner registry.
+- Claude-native lanes are port-authored agent definitions. Fable, Opus and Sonnet select their rolling family alias, and the Opus 5.5 and Haiku 5.5 pins select their exact model, each with the requested effort, for every selectable Claude-native pair in the model catalog. `registry/render.ts` generates them from the runner registry.
 - A Codex build shares the same `skills/` tree. It adds `plugins/pstack/.codex-plugin/plugin.json`, a root `.agents/plugins/marketplace.json`, and `plugins/pstack/skills/poteto-mode/references/codex-tools.md` (the Claude-to-Codex tool, model, and built-in map), plus a one-line Platform note in the skills that name a Claude primitive. The skill content itself is unchanged. See [CHANGES.md](CHANGES.md#codex-port).
 
 ## Modifications
@@ -58,7 +58,7 @@ Files authored for this port (not derived from upstream):
 - `plugins/pstack/skills/poteto-mode/scripts/resolve-codex-transcript`, `resolve-codex-transcript.ts`, and `resolve-codex-transcript.test.ts` (Reflect's known-chat Codex transcript lookup, #140; behavior and test cases from Donncha O'Toole's contribution)
 - `.claude/skills/verify-open-pstack/scripts/reflect.test.ts` (#140)
 - `plugins/pstack/skills/babysit/SKILL.md` (independently authored; workflow informed by Cursor's public `/babysit` behavior)
-- `plugins/pstack/agents/pstack-fable-*.md` and `plugins/pstack/agents/pstack-opus-*.md` (Claude-native frontier lanes at each selectable effort)
+- `plugins/pstack/agents/pstack-<family>-<effort>.md` for the Fable, Opus, Sonnet, Opus 5.5 and Haiku 5.5 families (Claude-native lanes at each selectable effort)
 - `plugins/pstack/hooks/hooks.json`, `plugins/pstack/hooks/session-start`, `plugins/pstack/hooks/session-start-context.md`, and `plugins/pstack/hooks/.gitattributes` (the auto-fire hook, its mandate, and LF checkout on Windows)
 - `NOTICE.md` (this file)
 - `README.md`

@@ -3,6 +3,10 @@
 Mergify auto-queue is live: ready PRs to main require passing verify, Unfret and exact-head live-gate, and no unresolved review thread; workflow changes require operator queueing.
 This port applies the Cursor → Claude Code substitutions in skill bodies. Earlier drafts left them flagged; this revision resolves them. A later pass added a Codex build that shares the same skills; see [Codex port](#codex-port) below.
 
+## Unreleased
+
+**Claude Haiku 5.5 lanes.** The model catalog registers `claude:claude-haiku-5-5` as an exact pin, with five native agents, `pstack-haiku-5-5-low` to `pstack-haiku-5-5-max`, and efforts `low` to `max`. On a Claude Code parent an unregistered Claude model is a dropout, so this is the first way to run Haiku lanes there. The pin is optional; no role default changes. The catalog registers no `haiku` alias, because Claude Code resolves that alias to Haiku 4.5, which has no effort setting, on Bedrock, Vertex and Foundry (#223, by @jwerby).
+
 ## 1.15.0 runs Devin, agy and dsh lanes in any repository
 
 Open Pstack 1.15.0 keeps the Cursor pstack 0.15.25 sync. It ships PR #215, merged after 1.14.0. Default roles and panels are unchanged.
