@@ -291,6 +291,12 @@ test('the first-run case requires a sheet equal to the catalog role defaults', a
   await rejectsUnbounded(c, f, written);
   await writeFile(path, `# pstack model configuration\n\n${lines.slice(1).join('\n')}\n`);
   await expect(c.assert(record('codex', 'pstack:setup-pstack'), f)).rejects.toThrow('first-run-not-role-defaults');
+  await writeFile(path, written);
+  for (const skills of ['.claude/skills', '.agents/skills']) {
+    await mkdir(join(f.dir, skills), { recursive: true });
+    await expect(c.assert(record('codex', 'pstack:setup-pstack'), f)).rejects.toThrow(`first-run-offer-accepted:${skills}`);
+    await rm(join(f.dir, skills.split('/')[0]!), { recursive: true });
+  }
 });
 
 test('the configure case answers yes to full access and requires that setting with only the Opus descriptor', async () => {
@@ -341,30 +347,36 @@ test('the full-access writer case quotes each browser argument for sh and encode
 });
 
 for (const harness of ['claude', 'codex'] as const) {
-  test(`${harness}: the keep-setting case requires the setting line and every role line after a rerun`, async () => {
+  test(`${harness}: the keep-setting case gives no answers and requires an unchanged sheet and mirror with no question`, async () => {
     const f = await fixture(harness), c = recipe('setup', harness).find(c => c.id === 'keep-setting')!, installed = await readCatalog(location);
     await writeFile(join(f.dir, 'AGENTS.md'), 'mirror\n');
     await c.prepare!(f);
-    if (harness === 'codex') await expect(readFile(join(f.dir, 'AGENTS.md'))).rejects.toThrow();
-    else expect(await readFile(join(f.dir, 'AGENTS.md'), 'utf8')).toBe('mirror\n');
     const path = join(f.dir, 'pstack-models.md'), prepared = await readFile(path, 'utf8');
-    expect(prepared).toEndWith('\ncodex writer sandbox: full-access\n');
-    const omitted = [...installed.defaults.keys()].find(role => !prepared.includes(`\n${role}: `))!;
-    expect(installed.defaults.get(omitted)).toEqual(['inherit-parent']);
-    const rerun = prepared.replace('codex writer sandbox: full-access\n', `${omitted}: inherit-parent\ncodex writer sandbox: full-access\n`);
-    await writeFile(path, rerun);
-    if (harness === 'codex') await mirror(f, rerun);
-    expect((await c.assert(record(harness, 'pstack:setup-pstack'), f)).assertions)
-      .toEqual(['skill-loaded', 'file:pstack-models.md', ...(harness === 'codex' ? ['codex-mirror'] : []), 'setting:codex writer sandbox: full-access']);
+    expect(prepared).toBe(`# pstack model configuration\n\n${[...installed.defaults].map(([role, lanes]) => `${role}: ${lanes.join(', ')}`).join('\n')}\n${FULL_ACCESS}`);
+    const agents = harness === 'codex' ? `<!-- pstack:models:begin -->\n${prepared}<!-- pstack:models:end -->\n` : 'mirror\n';
+    expect(await readFile(join(f.dir, 'AGENTS.md'), 'utf8')).toBe(agents);
+    expect(c.prompt(f)).not.toContain('Use these answers');
+    await writeFile(path, prepared);
+    expect((await c.assert(record(harness, 'pstack:setup-pstack'), f)).assertions).toEqual(['skill-loaded', 'file:pstack-models.md', 'no-question', 'sheet-unchanged',
+      ...(harness === 'codex' ? ['codex-mirror-unchanged'] : []), 'setting:codex writer sandbox: full-access']);
 
-    for (const [wrong, reason] of [
-      [rerun.replace('codex writer sandbox: full-access\n', ''), 'setting-not-kept'],
-      [rerun.replace('sandbox: full-access', 'sandbox: bounded'), 'setting-not-kept'],
-      [rerun.replace(/\nbug-fix: [^\n]*/, ''), 'keep-setting-sheet-mismatch'],
-    ]) {
-      await writeFile(path, wrong!);
-      await expect(c.assert(record(harness, 'pstack:setup-pstack'), f)).rejects.toThrow(reason);
+    const asked = record(harness, 'pstack:setup-pstack');
+    asked.tools.push({ name: 'AskUserQuestion', id: 'q', input: {}, parent: null, failed: true });
+    await expect(c.assert(asked, f)).rejects.toThrow('keep-setting-asked');
+    for (const wrong of [prepared.replace(FULL_ACCESS, ''), prepared.replace(FULL_ACCESS, BOUNDED), prepared.replace(/\nbug-fix: [^\n]*/, ''), `${prepared}\n`]) {
+      await writeFile(path, wrong);
+      await expect(c.assert(record(harness, 'pstack:setup-pstack'), f)).rejects.toThrow('keep-setting-sheet-changed');
     }
+    await writeFile(path, prepared);
+    if (harness === 'codex') {
+      await writeFile(join(f.dir, 'AGENTS.md'), `notes\n${agents}`);
+      await expect(c.assert(record(harness, 'pstack:setup-pstack'), f)).rejects.toThrow('keep-setting-mirror-changed');
+    }
+  });
+
+  test(`${harness}: every setup prompt declines both verification offers`, async () => {
+    const f = await fixture(harness);
+    for (const c of recipe('setup', harness)) expect(c.prompt(f)).toEndWith('If setup offers to generate a verification skill or a formal verification skill, decline both.');
   });
 }
 

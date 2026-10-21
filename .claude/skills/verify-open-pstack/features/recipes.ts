@@ -31,6 +31,7 @@ export const CLAUDE_TOOLS = 'Skill,Read,Glob,Grep,Write,Edit,Bash,Agent,Task,Tod
 export const DEFAULT_ROLES: Record<Harness, string> = { claude: 'bug-fix', codex: 'judgment and prose' };
 export const ROUTE = /^([a-z][a-z0-9-]*):([A-Za-z0-9._/-]+)@([a-z]+)$/;
 const SETUP_DESCRIPTOR = 'claude:opus@high';
+const DECLINE_OFFERS = 'If setup offers to generate a verification skill or a formal verification skill, decline both.';
 const DESCRIPTOR = /\b[a-z][a-z0-9-]*:[A-Za-z0-9._/-]+@[a-z]+/g;
 const SHEET_HEADER = '# pstack model configuration\n\n';
 const SETTING = 'codex writer sandbox: ';
@@ -415,7 +416,8 @@ const setup: Case[] = [{
     const text = await readFile(sheet, 'utf8');
     if (!Bun.deepEquals(roleLines(text), [...(await readCatalog(f.location)).defaults].map(([role, lanes]) => `${role}: ${lanes.join(', ')}`))) throw new Error('first-run-not-role-defaults');
     bounded(text);
-    return { assertions: [...assertions, ...await mirrored(f, sheet), 'sheet:role-defaults', `setting:${BOUNDED_SETTING}`], files: [sheet] };
+    for (const skills of ['.claude/skills', '.agents/skills']) if (await lstat(join(f.dir, skills)).then(() => true, () => false)) throw new Error(`first-run-offer-accepted:${skills}`);
+    return { assertions: [...assertions, ...await mirrored(f, sheet), 'sheet:role-defaults', `setting:${BOUNDED_SETTING}`, 'offers-declined'], files: [sheet] };
   },
 }];
 
@@ -555,25 +557,24 @@ function writerRefusal(): Case {
 }
 
 function keepSetting(): Case {
-  let expected: string[] = [];
+  let sheetBytes = '', mirrorBytes = '';
   return {
     id: 'keep-setting',
     codexSandbox: 'danger-full-access',
     claudePermission: 'bypassPermissions',
     async prepare(f) {
-      const roles = [...(await readCatalog(f.location)).defaults];
-      const omitted = roles.find(([, lanes]) => lanes.every(lane => !lane.includes(':')))?.[0];
-      expected = roles.map(([role, lanes]) => `${role}: ${lanes.join(', ')}`).sort();
-      await writeFile(join(f.configHome, 'pstack-models.md'), sheetText(roles.filter(([role]) => role !== omitted)) + `${FULL_ACCESS_SETTING}\n`);
-      if (f.harness === 'codex') await rm(join(f.configHome, 'AGENTS.md'), { force: true });
+      sheetBytes = sheetText([...(await readCatalog(f.location)).defaults]) + `${FULL_ACCESS_SETTING}\n`;
+      mirrorBytes = `${MIRROR_BEGIN}\n${sheetBytes}${MIRROR_END}\n`;
+      await writeFile(join(f.configHome, 'pstack-models.md'), sheetBytes);
+      if (f.harness === 'codex') await writeFile(join(f.configHome, 'AGENTS.md'), mirrorBytes);
     },
-    prompt: f => `${invoke(f.harness, 'setup-pstack', `Use these answers and ask nothing else. Keep every role assignment and every family's current effort. I confirm every write. Write the setup report to ${join(f.dir, 'result.md')}.`)} Do not push, post, or contact GitHub.`,
+    prompt: f => `${invoke(f.harness, 'setup-pstack', `Write the setup report to ${join(f.dir, 'result.md')}.`)} Do not push, post, or contact GitHub.`,
     async assert(record, f) {
       const sheet = join(f.configHome, 'pstack-models.md'), assertions = [loaded(record, 'pstack:setup-pstack'), await written(record, sheet)];
-      const text = await readFile(sheet, 'utf8');
-      if (!Bun.deepEquals(settingLines(text), [FULL_ACCESS_SETTING])) throw new Error('setting-not-kept');
-      if (!Bun.deepEquals(roleLines(text).sort(), expected)) throw new Error('keep-setting-sheet-mismatch');
-      return { assertions: [...assertions, ...await mirrored(f, sheet), `setting:${FULL_ACCESS_SETTING}`], files: [sheet] };
+      if (record.tools.some(t => t.name === 'AskUserQuestion')) throw new Error('keep-setting-asked');
+      if (await readFile(sheet, 'utf8') !== sheetBytes) throw new Error('keep-setting-sheet-changed');
+      if (f.harness === 'codex' && await readFile(join(f.configHome, 'AGENTS.md'), 'utf8').catch(() => '') !== mirrorBytes) throw new Error('keep-setting-mirror-changed');
+      return { assertions: [...assertions, 'no-question', 'sheet-unchanged', ...(f.harness === 'codex' ? ['codex-mirror-unchanged'] : []), `setting:${FULL_ACCESS_SETTING}`], files: [sheet] };
     },
   };
 }
@@ -687,7 +688,7 @@ export function recipe(feature: string, harness: Harness, routes: string[] = [])
   if (feature === 'project-skill') return [projectSkill];
   if (feature === 'hook:startup') return [startupHook];
   if (feature === 'runner') return runner(harness, routes);
-  if (feature === 'setup' || feature === 'skill-invocation:setup-pstack') return setup;
+  if (feature === 'setup' || feature === 'skill-invocation:setup-pstack') return setup.map(c => ({ ...c, prompt: f => `${c.prompt(f)} ${DECLINE_OFFERS}` }));
   if (feature === 'catalog') return catalog(harness);
   if (feature === 'shipped-tools') return [shippedTools];
   if (feature === 'agent-preload:poteto-agent' && harness === 'claude') return [agentPreload];
