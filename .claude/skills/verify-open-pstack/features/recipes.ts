@@ -130,15 +130,16 @@ async function ciFixed(_record: SessionRecord, f: Fixture): Promise<Evidence> {
   return { assertions: ['fixed:sum.mjs'], files: [join(f.dir, 'sum.mjs')] };
 }
 
-async function sumEdited(_record: SessionRecord, f: Fixture): Promise<Evidence> {
-  if (await readFile(join(f.dir, 'sum.mjs'), 'utf8') === TASK['sum.mjs']) throw new Error('sum-not-edited:sum.mjs');
-  return { assertions: ['edited:sum.mjs'], files: [join(f.dir, 'sum.mjs')] };
+async function sumTestPassed(_record: SessionRecord, f: Fixture): Promise<Evidence> {
+  if (await readFile(join(f.dir, 'sum.test.mjs'), 'utf8') !== TASK['sum.test.mjs']) throw new Error('test-changed:sum.test.mjs');
+  await f.run(['bun', 'sum.test.mjs'], { cwd: f.dir }).catch(() => { throw new Error('test-failed:sum.test.mjs'); });
+  return { assertions: ['test-passed:sum.test.mjs'], files: [join(f.dir, 'sum.mjs'), join(f.dir, 'sum.test.mjs')] };
 }
 
 const overrides: Record<string, Case> = {
   'fix-ci': skillCase('fix-ci', 'There is no pull request or remote. The failing CI check is the local command `sh ci.sh` in $DIR. Fix it locally and do not push.', ciFixed),
   babysit: skillCase('babysit', 'The pull request is the local `main` branch of the repository at $DIR; there is no remote. Its one failing check is the local command `sh ci.sh`. Do exactly one babysit pass: fix the failing check locally, push nothing, change nothing remote, then stop instead of watching.', ciFixed),
-  'principle-never-block-on-the-human': skillCase('principle-never-block-on-the-human', 'The bug in $DIR/TASK.md is a reversible local change. Apply the skill: implement the smallest fix in sum.mjs and verify it with bun sum.test.mjs.', sumEdited),
+  'principle-never-block-on-the-human': skillCase('principle-never-block-on-the-human', 'The bug in $DIR/TASK.md is a reversible local change. Apply the skill: implement the smallest fix in sum.mjs and verify it with bun sum.test.mjs.', sumTestPassed),
   'make-pr-easy-to-review': skillCase('make-pr-easy-to-review', 'The pull request is the local branch `feature` against `main` in $DIR; there is no remote. Do not rewrite history or push; write reviewer guidance only.', async (_record, f) => {
     if ((await git(f, 'rev-parse', 'feature')).trim() !== (await readFile(`${f.dir}.head`, 'utf8')).trim()) throw new Error('history-rewritten:feature');
     return { assertions: ['history-unchanged'], files: [] };
