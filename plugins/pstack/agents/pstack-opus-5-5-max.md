@@ -3,7 +3,6 @@ name: pstack-opus-5-5-max
 description: Native Claude lane for pstack roles configured as claude:claude-opus-5-5@max.
 model: claude-opus-5-5
 effort: max
-background: true
 disallowedTools: Agent, Task
 ---
 

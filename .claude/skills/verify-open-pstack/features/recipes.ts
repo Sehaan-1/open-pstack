@@ -593,7 +593,7 @@ const nativeAgents: Case = {
   async prepare(f) {
     for (const agent of NATIVE_AGENTS) await writeFile(join(f.dir, `${agent}.nonce`), `${crypto.randomUUID()}\n`);
   },
-  prompt: f => `Do no engineering work. ${NATIVE_AGENTS.map(agent => `Use the Agent tool once with subagent_type pstack:${agent}, and give it exactly this task: "Read ${join(f.dir, `${agent}.nonce`)} and write its exact contents to ${join(f.dir, `${agent}.out`)}. Do nothing else."`).join(' ')} Wait until all output files exist, then reply DONE. ${rules(f.dir)}`,
+  prompt: f => `Do no engineering work. ${NATIVE_AGENTS.map(agent => `Use the Agent tool once with subagent_type pstack:${agent} and run_in_background false, and give it exactly this task: "Read ${join(f.dir, `${agent}.nonce`)} and write its exact contents to ${join(f.dir, `${agent}.out`)}. Then reply with those exact contents as your final answer. Do nothing else."`).join(' ')} Send all of these Agent calls in one message, wait for every report, then reply DONE. ${rules(f.dir)}`,
   async assert(record, f) {
     const assertions: string[] = [];
     for (const agent of NATIVE_AGENTS) {
@@ -601,7 +601,9 @@ const nativeAgents: Case = {
       if (!call) throw new Error(`agent-not-dispatched:pstack:${agent}`);
       if (!record.tools.some(t => t.parent === call.id)) throw new Error(`child-did-not-run:pstack:${agent}`);
       const wrote = await readFile(join(f.dir, `${agent}.out`), 'utf8').catch(() => null);
-      if (wrote?.trim() !== (await readFile(join(f.dir, `${agent}.nonce`), 'utf8')).trim()) throw new Error(`nonce-mismatch:pstack:${agent}`);
+      const nonce = (await readFile(join(f.dir, `${agent}.nonce`), 'utf8')).trim();
+      if (wrote?.trim() !== nonce) throw new Error(`nonce-mismatch:pstack:${agent}`);
+      if (!call.result?.includes(nonce)) throw new Error(`report-not-inline:pstack:${agent}`);
       assertions.push(`native:${agent}`);
     }
     return { assertions, files: NATIVE_AGENTS.map(agent => join(f.dir, `${agent}.out`)) };

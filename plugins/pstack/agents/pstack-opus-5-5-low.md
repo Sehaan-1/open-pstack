@@ -3,7 +3,6 @@ name: pstack-opus-5-5-low
 description: Native Claude lane for pstack roles configured as claude:claude-opus-5-5@low.
 model: claude-opus-5-5
 effort: low
-background: true
 disallowedTools: Agent, Task
 ---
 

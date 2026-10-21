@@ -3,7 +3,6 @@ name: pstack-haiku-5-5-xhigh
 description: Native Claude lane for pstack roles configured as claude:claude-haiku-5-5@xhigh.
 model: claude-haiku-5-5
 effort: xhigh
-background: true
 disallowedTools: Agent, Task
 ---
 

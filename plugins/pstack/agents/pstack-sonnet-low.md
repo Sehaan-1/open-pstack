@@ -3,7 +3,6 @@ name: pstack-sonnet-low
 description: Native Claude lane for pstack roles configured as claude:sonnet@low.
 model: sonnet
 effort: low
-background: true
 disallowedTools: Agent, Task
 ---
 
