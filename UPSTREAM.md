@@ -8,15 +8,15 @@ open-pstack tracks [Cursor's pstack](https://github.com/cursor/plugins/tree/main
 | --- | --- |
 | Repository | `https://github.com/cursor/plugins.git` |
 | Path | `pstack/` |
-| Commit | `99743e9c151c8537cbbf1f98bb38f34ef3368453` |
-| Upstream version | `0.15.25` |
-| open-pstack version | `1.15.0` |
+| Commit | `88d47514b82e7c44f00f2b2a72ff6dd12158038c` |
+| Upstream version | `0.15.29` |
+| open-pstack version | `1.16.0` |
 
-The table above is the current Cursor sync point. Open Pstack 1.10.0 imported this 0.15.25 sync, and 1.11.0 through 1.15.0 keep it. `README-UPSTREAM.md` preserves the upstream pstack README verbatim. `CHANGES.md` and `NOTICE.md` describe the adaptations and provenance.
+The table above is the current Cursor sync point. Open Pstack 1.16.0 imported this 0.15.29 sync. `README-UPSTREAM.md` preserves the upstream pstack README verbatim. `CHANGES.md` and `NOTICE.md` describe the adaptations and provenance.
 
 ## Upstream-only exclusions
 
-- Commits `799151d` and `6fecddb` add and relocate `make-bot-ui`. It depends on Cursor routines, webhook events, and UI primitives that Claude Code and Codex do not share.
+- Commits `799151d` and `6fecddb` add and relocate `make-bot-ui`, and `a968159` renames it after its folder. It depends on Cursor routines, webhook events, and UI primitives that Claude Code and Codex do not share. `a968159`'s other hunk names `poteto-mode` after its folder, which the port's `poteto-mode/SKILL.md` already does.
 - Four `disable-model-invocation: true` lines from `73f8be4` are not applied to `how`, `why`, `unslop`, or `typescript-best-practices`. Poteto-mode invokes those skills by name, and the flag blocks that route on Claude Code.
 - The default-model hunks for `bug-fix`, `perf-issue`, and `hillclimb` from `23a56e2`, `889ec4b`, and `70b2dc8` are not applied. Those frequent code-writing roles stay on `codex:gpt-6.1-sol@max`.
 - `5bf2b15`'s setup budget question, its `# budget` line, and its step down to a lower detected effort are not applied. Setup already asks one requested effort per assigned family, and the step-down would silently lower a requested effort.
@@ -33,14 +33,23 @@ The table above is the current Cursor sync point. Open Pstack 1.10.0 imported th
 - The root Agent Plugins v1 `pstack/plugin.json` from `e5a02f8` and its version bumps through 0.15.25 are not applied. The port keeps its current Claude manifest at `plugins/pstack/.claude-plugin/plugin.json` and Codex manifest at `plugins/pstack/.codex-plugin/plugin.json`. Agent Plugins v1 is revisited with #13.
 - `unslop` takes `bc697d0`'s description without its `disable-model-invocation: true` line, as for `73f8be4` above.
 - `pstack/.cursor-plugin/plugin.json` and `pstack/docs/guide/` are not imported. The Cursor manifest has no Claude Code or Codex consumer, and the guide shows Cursor's interface; `poteto-help` links to the guide upstream. That covers the 0.15.21 to 0.15.25 version bumps and `e5136d8`'s guide edit.
+- Upstream's own Claude Code install is not applied. That covers `182f2ce`'s and `1b80080`'s generated tree under `harness/pstack/claude-code/`, `scripts/generate-pstack-harness-trees.mjs`, `scripts/validate-plugins.mjs`, the root `.claude-plugin/marketplace.json` entry, the adapter at `pstack/docs/harness/claude-code.md`, and `a968159`'s generator change. That install runs `grok-*` and `gpt-*` roles on the session's Claude model, has no Codex, and maps Cursor names at runtime from the adapter, which would be a second mapping layer on top of the port's own. `README-UPSTREAM.md` takes the README text from `182f2ce`, `1b80080` and `019a6a2` verbatim.
+- `019a6a2`'s guide refresh and `scripts/check-pstack-docs.mjs` are not applied. The port does not import `pstack/docs/guide/`, so that check has nothing to compare. The same covers the guide edits in `7b353f7`, `f9be7aa` and `d457567`.
+- The two harness paragraphs that `f9be7aa` puts in `poteto-help/SKILL.md`, which install upstream's Claude Code tree and describe other tools, are not applied. The port keeps its own paragraph on Claude Code and Codex.
+- The 0.15.26 to 0.15.29 manifest bumps in `pstack/plugin.json` and `pstack/.cursor-plugin/plugin.json` from `0b8e952`, `0148b78` and `d457567` are not applied, as for the earlier bumps above.
+- `create-formal-verification-skill` takes `4382e68` without its `disable-model-invocation: true` line, because setup's formal verification offer invokes it and the flag blocks that route on Claude Code. `tests/skill-collision-repro.sh` lists it in `routed_model_skills`. `maintain-formal-verification-skill` keeps the flag and runs only when typed.
+- Setup's verification offers are steps 10 and 11 in the port, after its step 9 smoke test. The port never took upstream's step 7, "Offer a verification skill", which upstream has carried since 0.11.3. This sync restores it as step 10, and `f9be7aa`'s formal verification offer becomes step 11. Each keeps upstream's check for a project that already has one.
 - `poteto-agent.md` does not take `b93e811`'s search of `~/.cursor/plugins/` for poteto-mode, its highest-version rule, or its note that the skill catalog hides poteto-mode. The Claude agent preloads `pstack:poteto-mode`, the port's poteto-mode is not hidden, and Codex has no `poteto-agent` type. The agent keeps upstream's "Use the absolute path your parent gave you."
 
 ## Local port-patch ledger
 
+- **#235 — Claude transcript folder encoding**: the port wrote Claude Code's per-project transcript path into `recall`, `automate-me` and the `session-pickup` playbook. Claude Code encodes each `/` and each `.` in the workspace path as `-`, so a `.claude/worktrees/` session's folder holds `--claude-worktrees-`. Keep both characters in those three lines during syncs.
 - **#140 — Reflect transcript resolution**: Cursor's Reflect step 1 reads the `agent-transcripts/` directory its system prompt names; the port had substituted Claude Code's per-project directory, which left Codex without a lookup. The port replaces that step's body with one line that points to `plugins/pstack/skills/poteto-mode/references/codex-tools.md#active-transcripts`, and leaves the rest of `reflect/SKILL.md` unchanged. That mapping section holds the harness specifics: the Claude per-project scope, layouts, candidate and scan limits, opening-message verification, the Codex resolver call, and the 2,000-word digest fallback. The port-authored Bun resolver `plugins/pstack/skills/poteto-mode/scripts/resolve-codex-transcript.ts`, started through the `sh` launcher `resolve-codex-transcript` next to it so project Bun config and `.env` files cannot affect it, looks up the parent's known chat ID in Codex's read-only `threads` index, checks rollout scope and ownership, and prints opening-message metadata without transcript text. Preserve this divergence during upstream syncs: keep step 1 as the one-line pointer and keep the mapping section and resolver.
 - **#120 — harness config homes** (tracked for #105): Cursor's setup destination is `~/.cursor/rules/`. The shared port resolves nonempty `CLAUDE_CONFIG_DIR` / `CODEX_HOME`, otherwise `$HOME/.claude` / `$HOME/.codex`, once at `plugins/pstack/skills/poteto-mode/references/codex-tools.md#harness-config-homes`. `setup-pstack/SKILL.md` reuses that home for reads, sheet/integration writes, snapshots, restoration, and readback; Claude preserves the literal legacy import at the default home and renders exactly `@./pstack-models.md` for redirected homes, keeping spaces and `#` in the config-directory name out of the import line; reruns replace the one import whose target basename is `pstack-models.md`, append if absent, and stop if duplicated. Preserve this intentional divergence during upstream syncs. The named config-home invariant in `tests/skill-collision-repro.sh` rejects literal default destinations outside the legacy import, requires the literal default-home rendering and zero/one/many import rules, and verifies unset/empty/space-containing resolution without daily writes. See `CHANGES.md` for the port correction and `tests/setup-config-home-repro.sh` for redirected live-evidence preparation. The Cursor sync point is unchanged.
 
 - **#157 — role pointers**: Cursor names model descriptors in the Arena, Architect, How, Interrogate, and Swarm skills, the bug-fix, feature, hillclimb, perf-issue, and refactoring playbooks, poteto-mode's delegation defaults, and setup's probe table and first-run sheet. The port replaces each with a role pointer: the role's backticked sheet label and a link to `plugins/pstack/skills/poteto-mode/references/model-catalog.md#role-defaults`, which `registry/render.ts` generates from `plugins/pstack/skills/poteto-mode/scripts/runner/registry/models.ts`. Interrogate's reviewer table and setup's probe table and example sheet are deleted. When an upstream sync changes a model slug on one of these lines, keep the port's line and put the model change in `registry/models.ts`. `runner/registry.test.ts` enforces the rule: `ROLE_POINTERS` names each file's roles, and its text scan rejects any descriptor or versioned model name in `plugins/pstack/**/*.md`, `README.md`, and `docs/reference.md` outside the generated catalog and agents.
+
+- **#46 — quiet setup reruns**: Upstream's setup has no keep-roles, per-family effort, or write-confirmation questions, so this is a port patch. `setup-pstack/SKILL.md` states one qualifying-rerun exception before step 2's keep-roles question. On a rerun whose sheet loaded with one valid setting line, with no change named and no inconsistency or kept-predecessor proposal that needs a choice, setup validates in step 3, keeps and prints the roles and efforts instead of asking steps 2 and 4, and writes without step 7's confirmation when every step 5 probe passes. Steps 4, 7 and 8 and the offers in steps 10 and 11 each name the exception. It skips no validation, permission check, snapshot, readback, or the step 9 smoke test, and a failed probe still stops without writing. `poteto-help` says the same for reruns. The verifier's `keep-setting` case gives no answers and requires the sheet and Codex mirror to keep their bytes with no `AskUserQuestion` call. Preserve this divergence during upstream syncs.
 
 - **#191 — landing playbooks and per-spawn effort**: `ce649c0` cuts Shipping to six steps and both autopilots to principles. The port takes the cut's rules and reasons but keeps the landing procedure from 1.3.0: Shipping keeps steps 1 to 9, Autopilot-full step 2 holds the guarded rebase and push, and Autopilot-stack step 2 holds the fork and topology rules. Those steps disarm auto-merge and merge-queue entries before verification and before any rewrite, keep the verdict head and base apart from the landing head and base, resolve the base fetch remote apart from the head push URL, bind each push to a captured SHA, and merge only through a server-enforced expected head. The named landing invariants in `tests/skill-collision-repro.sh` check those rules by step and phrase, so a sync that moves them updates the invariants in the same change. `ce649c0`'s Match the model to the job rule is taken with port adaptations: the starting level is the role's configured effort, an unlisted effort moves to the nearest effort the catalog row lists, a configured `ultra` stays, and the fast and standard speed sentences are dropped because the port's descriptors carry no speed selector.
 
@@ -58,19 +67,29 @@ Fetch and inspect only commits that touched pstack after the recorded sync point
 
 ```shell
 git fetch cursor main
-git log --oneline 99743e9c151c8537cbbf1f98bb38f34ef3368453..cursor/main -- pstack
-git diff --stat 99743e9c151c8537cbbf1f98bb38f34ef3368453..cursor/main -- pstack
+git log --oneline 88d47514b82e7c44f00f2b2a72ff6dd12158038c..cursor/main -- pstack
+git diff --stat 88d47514b82e7c44f00f2b2a72ff6dd12158038c..cursor/main -- pstack
 ```
 
 No output means the tracked pstack tree has not changed. This comparison does not need a polling service or generated mirror branch.
 
 ## Incorporate a change
 
-1. Create or update a GitHub issue in `ericlitman/open-pstack` and branch from current `main`.
-2. Read each upstream pstack commit in order. Bring over its intent and content, then apply only the Claude Code and Codex substitutions documented in `CHANGES.md`.
-3. Keep one shared `plugins/pstack/skills/` tree. Put harness translation in the existing `codex-tools.md` and provider routing in `provider-dispatch.md`; do not fork a skill per harness.
-4. Update the commit and version in this file, the affected provenance rows in `NOTICE.md`, and `README-UPSTREAM.md` when upstream changes it.
-5. Run CI-equivalent checks locally, then run the installed Claude Code and Codex behavioral lanes required by the changed surface. Unit tests alone are not a release gate.
-6. Merge the reviewed PR before tagging the next open-pstack release. Publish the release with `python3 scripts/release.py publish` from a clean checkout of `main`.
+1. Create or update a GitHub issue in `ericlitman/open-pstack` and branch from current `main`. Pin the upstream target commit in the issue.
+2. Read each upstream pstack commit in order, and record a decision for each one in the issue as a table: adopt, adapt (name the adaptation), or exclude (give the reason). Bring over each adopted commit's intent and content, then apply only the Claude Code and Codex substitutions documented in `CHANGES.md` and the adaptations in this file.
+3. Run the audit and the mechanical merge from a clean checkout:
+
+   ```shell
+   python3 scripts/upstream-audit.py --port HEAD --upstream <target> > audit.json
+   python3 scripts/upstream-merge.py audit.json
+   ```
+
+   The merge checks out files the port never changed, merges the rest three ways, and prints counts of verbatim, clean, review and unmapped paths. It exits 1 when any path needs review.
+4. Resolve each review row by hand. A conflict hunk keeps the port's adaptation and takes upstream's new intent beside it. A change to an excluded path stays out and extends that exclusion's line in this file. Each unmapped path, such as a Cursor manifest or the guide, is excluded or mapped by a decision in step 2. Record every hand resolution and every new adaptation or exclusion in this file.
+5. Keep one shared `plugins/pstack/skills/` tree. Put harness translation in the existing `codex-tools.md` and provider routing in `provider-dispatch.md`; do not fork a skill per harness.
+6. Add every new skill to the `skills` list in `.claude/skills/verify-open-pstack/features/registry.json`. When the sync changes what a skill with its own recipe does, such as `setup-pstack`, update that recipe in `features/recipes.ts`, its unit tests under `scripts/`, and its feature page.
+7. Update the commit and version in this file, add a provenance row to `NOTICE.md`, and take `README-UPSTREAM.md` when upstream changes its README.
+8. Run CI-equivalent checks locally, then run the installed Claude Code and Codex behavioral lanes required by the changed surface with `verify-open-pstack`. A sync that edits the verifier runs from the candidate head with `--self-test`. A run above the session limit needs `--wide "<reason>"`. Unit tests alone are not a release gate.
+9. Merge the reviewed PR before tagging the next open-pstack release. Publish the release with `python3 scripts/release.py publish` from a clean checkout of `main`.
 
 Cursor's version and open-pstack's version are independent. Cursor's version identifies the imported content; open-pstack's version identifies the cross-harness distribution.

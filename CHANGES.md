@@ -3,11 +3,29 @@
 Mergify auto-queue is live: ready PRs to main require passing verify, Unfret and exact-head live-gate, and no unresolved review thread; workflow changes require operator queueing.
 This port applies the Cursor → Claude Code substitutions in skill bodies. Earlier drafts left them flagged; this revision resolves them. A later pass added a Codex build that shares the same skills; see [Codex port](#codex-port) below.
 
-## Unreleased
+## 1.16.0 syncs to Cursor pstack 0.15.29
+
+Open Pstack 1.16.0 tracks Cursor pstack 0.15.29 at `88d47514b82e7c44f00f2b2a72ff6dd12158038c`. Sixteen upstream commits since 0.15.25 touch pstack. Nine change skill content, and all nine are applied with the port adaptations below. `a968159` names two skills after their folders: the port's `poteto-mode` already complies, and `make-bot-ui` stays out. Three add upstream's own Claude Code install and a docs check, which stay out apart from their README text. Three bump only the Cursor manifests and guide, which stay out. The release also fixes #46 and #235, and ships Claude Haiku 5.5 lanes (#223), foreground waits on Claude Code (#232, #233) and the comment sweep (#218), all merged after 1.15.0. Default roles and panels are unchanged.
 
 **Claude Haiku 5.5 lanes.** The model catalog registers `claude:claude-haiku-5-5` as an exact pin, with five native agents, `pstack-haiku-5-5-low` to `pstack-haiku-5-5-max`, and efforts `low` to `max`. On a Claude Code parent an unregistered Claude model is a dropout, so this is the first way to run Haiku lanes there. The pin is optional; no role default changes. The catalog registers no `haiku` alias, because Claude Code resolves that alias to Haiku 4.5, which has no effort setting, on Bedrock, Vertex and Foundry (#223, by @jwerby).
 
 **Claude Code subagents wait in the foreground.** The generated `pstack-<family>-<effort>` agents no longer set `background: true`, which Claude Code honored over a caller's `run_in_background: false` (#233). `references/codex-tools.md` has a Waits on Claude Code section: the main session runs long commands and fan-outs in the background, and a subagent dispatches the lanes it needs in the foreground, runs `watch-pr` in the foreground with `--timeout 240` instead of `/loop`, and waits on a background task in one bounded foreground call (#232). Provider dispatch, poteto-mode, babysit step 6 and `docs/reference.md` point to that section.
+
+**`/recall` in worktree sessions (#235).** `recall`, `automate-me` and the session-pickup playbook now encode each `/` and each `.` of the workspace path as `-`, as Claude Code does. Before this, every session under `.claude/worktrees/` looked for a transcript folder that does not exist.
+
+**New skills.** `/create-formal-verification-skill` generates a project-local skill that formally verifies the code where a bug costs the most and tests reach the least, with TLA+ as the default tool and a fallback when no verifier fits. `/maintain-formal-verification-skill` finds the commits that touched verified code, brings the model and properties back in line, reruns them, and says whether each failure is drift or a bug. It runs only when typed.
+
+**Setup offers.** After its smoke test, setup offers once each to generate a verification skill and a formal verification skill, unless the project already has one.
+
+**Quiet setup reruns (#46).** On a rerun whose sheet loads with one valid setting line, with no change named and no inconsistency or kept-predecessor choice, setup no longer asks to keep the roles, asks no effort per family, and writes without a confirmation when every probe passes. It prints the kept roles, efforts and table, and mentions each verification offer in one line. Validation, permission checks, snapshots, readback and the smoke test still run, and a failed probe still stops without writing. A first run, an invalid sheet, a kept-predecessor proposal or a named change still asks.
+
+**Changed behavior.** `/sharpen` now returns a rewritten prompt and does not do the task: it says what a top professional would add, their raw material, methods and an outside check, then rewrites the prompt to ask for that. `/ketchup` lists every item waiting on the user, so each call is decidable from the reply, and never cuts items to stay under a word count. `typescript-best-practices` makes a brand with a type guard instead of `as`. `poteto-help` routes to the two formal verification skills and adds recipes for them and `/ketchup`.
+
+**Comments sweep (#218).** Code this repository owns drops comments outside the keep-list in `AGENTS.md`, across the runner, the Codex transcript resolver, the startup hook, the verifier, tests and repository config. A test keeps every model pair released by 1.15.0 in place.
+
+**Port adaptations.** `create-formal-verification-skill` drops `disable-model-invocation: true`, because setup's offer invokes it. The port's setup never had upstream's step 7 verification offer, so this sync restores it as step 10 and adds the formal offer as step 11, after the port's step 9. `poteto-help` keeps the port's install lines and harness paragraph. The verifier registers both new skills.
+
+**Not applied.** See `UPSTREAM.md`: upstream's generated Claude Code tree, its adapter, generator, plugin validator and root marketplace entry, the docs-vs-tree check, the two `poteto-help` harness paragraphs, `make-bot-ui`, and the 0.15.26 to 0.15.29 manifests and guide. Cursor's pstack now installs in Claude Code as `pstack@cursor-plugins`, with Claude models only and no Codex. Install one of the two, because both use the `pstack:` prefix. `README-UPSTREAM.md` is the verbatim upstream README.
 
 ## 1.15.0 runs Devin, agy and dsh lanes in any repository
 
