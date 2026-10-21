@@ -424,23 +424,27 @@ for (const harness of ['claude', 'codex'] as const) {
   });
 }
 
-test('codex: accept-formal-offer counts a successful read of this run\'s installed creator as the handoff, and nothing weaker', async () => {
+test('codex: accept-formal-offer counts a successful command whose output carries the installed creator\'s name and description lines', async () => {
   const base = await fixture('codex'), installed = join(base.dir, 'plugins/cache/open-pstack/pstack/1.16.0'), f = { ...base, location: installed };
+  const suffix = 'skills/create-formal-verification-skill/SKILL.md', creator = await readFile(join(location, suffix), 'utf8');
+  await mkdir(join(installed, 'skills/create-formal-verification-skill'), { recursive: true });
+  await writeFile(join(installed, suffix), creator);
   const c = recipe('setup', 'codex').find(c => c.id === 'accept-formal-offer')!;
   const rollout = JSON.stringify({ type: 'response_item', payload: { type: 'message', role: 'user', content: [{ type: 'input_text',
     text: `<skill>\n<name>pstack:setup-pstack</name>\n<path>${installed}/skills/setup-pstack/SKILL.md</path>\n---\nname: setup-pstack\n---\n</skill>` }] } });
-  const frontmatter = '---\nname: create-formal-verification-skill\ndescription: "Generate a project-local skill that formally verifies the code."\n---\n\n# Create a formal verification skill\n';
-  const read = (path: string, output = frontmatter, exitCode = 0) => ({ type: 'item.completed', item: { id: 'item_19', type: 'command_execution',
-    command: `/bin/zsh -lc 'cat "${path}" '`, aggregated_output: output, exit_code: exitCode, status: exitCode ? 'failed' : 'completed' } });
-  const done = { type: 'item.completed', item: { id: 'item_20', type: 'agent_message', text: 'ACCEPT-ROUTED' } };
+  const read = (cat: string, output = creator, exitCode = 0) => ({ type: 'item.completed', item: { id: 'item_21', type: 'command_execution',
+    command: `/bin/zsh -lc '${cat}'`, aggregated_output: output, exit_code: exitCode, status: exitCode ? 'failed' : 'completed' } });
+  const done = { type: 'item.completed', item: { id: 'item_22', type: 'agent_message', text: 'ACCEPT-ROUTED' } };
   const session = (...events: object[]) => parseSession('codex', events.map(e => JSON.stringify(e)).join('\n'), 0, 0, rollout);
-  const suffix = 'skills/create-formal-verification-skill/SKILL.md', viaHome = `$CODEX_HOME/plugins/cache/open-pstack/pstack/1.16.0/${suffix}`;
-  for (const path of [viaHome, join(installed, suffix)]) {
-    expect(session(read(path), done).skills).toEqual(['pstack:setup-pstack']);
-    expect((await c.assert(session(read(path), done), f)).assertions).toEqual(['skill-loaded', 'routed:create-formal-verification-skill', 'ended:ACCEPT-ROUTED']);
+  const relative = `cat ../../.codex/plugins/cache/open-pstack/pstack/1.16.0/${suffix}`, numbered = creator.split('\n').map((line, i) => `${String(i + 1).padStart(6)}\t${line}`).join('\n');
+  for (const event of [read(relative), read(`cat $CODEX_HOME/plugins/cache/open-pstack/pstack/1.16.0/${suffix}`),
+    read(`cat "\${CODEX_HOME}/plugins/cache/open-pstack/pstack/1.16.0/${suffix}"`), read(`cat -n ${join(installed, suffix)}`, numbered)]) {
+    expect(session(event, done).skills).toEqual(['pstack:setup-pstack']);
+    expect((await c.assert(session(event, done), f)).assertions).toEqual(['skill-loaded', 'routed:create-formal-verification-skill', 'ended:ACCEPT-ROUTED']);
   }
-  for (const events of [[read(viaHome, frontmatter, 1), done], [read(`$CODEX_HOME/plugins/cache/other/pstack/1.16.0/${suffix}`), done],
-    [read(join(base.dir, 'elsewhere', suffix)), done], [read(viaHome, '# Create a formal verification skill\n'), done], [done]]) {
+  const nameOnly = creator.split('\n').filter(line => !line.startsWith('description: ')).join('\n');
+  const other = await readFile(join(location, 'skills/setup-pstack/SKILL.md'), 'utf8');
+  for (const events of [[read(relative, creator, 1), done], [read(relative, nameOnly), done], [read('cat skills/setup-pstack/SKILL.md', other), done], [done]]) {
     await expect(c.assert(session(...events), f)).rejects.toThrow('skill-not-routed:create-formal-verification-skill');
   }
 });

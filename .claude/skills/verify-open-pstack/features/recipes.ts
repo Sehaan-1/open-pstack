@@ -444,12 +444,12 @@ const DECLINE_EXEMPT = new Set(['keep-setting', 'accept-formal-offer']);
 const isFormalCreator = (skill: string): boolean =>
   skill === 'pstack:create-formal-verification-skill' || skill.endsWith('/create-formal-verification-skill/SKILL.md');
 
-const CREATOR_SKILL_FILE = '/skills/create-formal-verification-skill/SKILL.md', CREATOR_NAME_LINE = 'name: create-formal-verification-skill';
 async function readInstalledCreator(record: SessionRecord, f: Fixture): Promise<boolean> {
-  const home = await realpath(f.configHome);
-  const paths = [f.location + CREATOR_SKILL_FILE];
-  if (f.location.startsWith(`${home}/`)) paths.push(`$CODEX_HOME${f.location.slice(home.length)}${CREATOR_SKILL_FILE}`);
-  return record.tools.some(t => !t.failed && paths.some(path => String(t.input.command).includes(path)) && !!t.result?.split('\n').includes(CREATOR_NAME_LINE));
+  const lines = (await readFile(`${f.location}/skills/create-formal-verification-skill/SKILL.md`, 'utf8')).split('\n');
+  const frontmatter = lines.slice(1, lines.indexOf('---', 1));
+  const expected = ['name: ', 'description: '].map(key => frontmatter.find(line => line.startsWith(key)) ?? '');
+  if (expected.includes('')) throw new Error('creator-frontmatter-incomplete');
+  return record.tools.some(t => !t.failed && expected.every(line => !!t.result?.includes(line)));
 }
 
 async function unconfigured(f: Fixture): Promise<void> {
