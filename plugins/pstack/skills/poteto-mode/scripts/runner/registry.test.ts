@@ -536,23 +536,28 @@ describe("module boundaries", () => {
     expect(importers).toEqual(["registry/providers.ts"]);
   });
 
-  it("keeps filesystem and process access out of the lane resolver's import closure", () => {
-    const closure = new Set<string>();
+  it("allows only node:os and node:path beyond relative imports in the lane resolver's closure", () => {
+    const sources = new Map<string, string>();
+    const external = new Set<string>();
     const visit = (path: string) => {
-      if (closure.has(path)) return;
-      closure.add(path);
-      for (const [, specifier] of readFileSync(path, "utf8").matchAll(/from\s+"([^"]+)"/g)) {
-        if (!specifier!.startsWith(".")) continue;
+      if (sources.has(path)) return;
+      const source = readFileSync(path, "utf8");
+      sources.set(path, source);
+      for (const [, specifier] of source.matchAll(/\b(?:from|import)\s*["']([^"']+)["']/g)) {
+        if (!specifier!.startsWith(".")) {
+          external.add(specifier!);
+          continue;
+        }
         const target = resolve(dirname(path), specifier!);
         if (target.startsWith(`${RUNNER}/`) && target.endsWith(".ts") && !target.endsWith(".test.ts")) visit(target);
       }
     };
     visit(join(RUNNER, "registry/index.ts"));
-    expect([...closure].map((path) => relative(RUNNER, path))).toContain("providers/shared.ts");
-    const offenders = [...closure]
-      .filter((path) => /from\s+"(?:node:fs|node:fs\/promises|fs|node:child_process)"|\bBun\.(?:file|write|spawn)\b/
-        .test(readFileSync(path, "utf8")))
-      .map((path) => relative(RUNNER, path));
+    expect([...sources.keys()].map((path) => relative(RUNNER, path))).toContain("providers/shared.ts");
+    expect([...external].filter((specifier) => specifier !== "node:os" && specifier !== "node:path")).toEqual([]);
+    const offenders = [...sources]
+      .filter(([, source]) => /\bBun\.|\bimport\s*\(|\brequire\s*\(/.test(source))
+      .map(([path]) => relative(RUNNER, path));
     expect(offenders).toEqual([]);
   });
 
