@@ -1,4 +1,4 @@
-import { afterEach, expect, test } from 'bun:test';
+import { afterEach, describe, expect, test } from 'bun:test';
 import { mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -20,40 +20,47 @@ async function waitingSession(harness: Harness): Promise<{ f: Fixture; c: Case; 
   return { f, c, record };
 }
 
-const fixed = 'export function sum(a, b) {\n  return a + b;\n}\n';
+const harnesses: Harness[] = ['claude', 'codex'];
+const sumWith = (body: string) => `export function sum(a, b) {\n${body}\n}\n`;
 
-test.each(['claude', 'codex'] as const)('%s never-block case rejects a waiting-only report', async harness => {
-  const { f, c, record } = await waitingSession(harness);
-  await expect(c.assert(record, f)).rejects.toThrow('test-failed:sum.test.mjs');
-});
+const recognized = [
+  '  return a + b;',
+  '  return a + b',
+  '  return b + a;',
+  '  return (a + b);',
+  '  return ( b+a ) ;',
+  '\treturn a+b;',
+];
 
-test.each(['claude', 'codex'] as const)('%s never-block case rejects a repair that leaves the test failing', async harness => {
-  const { f, c, record } = await waitingSession(harness);
-  await writeFile(join(f.dir, 'sum.mjs'), 'export function sum(a, b) {\n  return a + b - 1;\n}\n');
-  await expect(c.assert(record, f)).rejects.toThrow('test-failed:sum.test.mjs');
-});
+const unrecognized = [
+  '  return a - b;',
+  '  return a + b - 1;',
+  '  return a +;',
+  '  return (a + b;',
+  '  return a + b; // fixed',
+  '  return a + b; x();',
+  '  return\n  a + b;',
+  '  return a + b;\n  return 0;',
+];
 
-test.each(['claude', 'codex'] as const)('%s never-block case rejects a repair with a syntax error', async harness => {
-  const { f, c, record } = await waitingSession(harness);
-  await writeFile(join(f.dir, 'sum.mjs'), 'export function sum(a, b) {\n  return a +;\n}\n');
-  await expect(c.assert(record, f)).rejects.toThrow('test-failed:sum.test.mjs');
-});
+describe.each(harnesses)('%s never-block case', harness => {
+  test.each(recognized)('accepts %j and the fixture test passes on it', async body => {
+    const { f, c, record } = await waitingSession(harness);
+    await writeFile(join(f.dir, 'sum.mjs'), sumWith(body));
+    expect((await c.assert(record, f)).assertions).toEqual(expect.arrayContaining(['recognized-repair:sum.mjs', 'test-unchanged:sum.test.mjs']));
+    await command(['bun', 'sum.test.mjs'], { cwd: f.dir });
+  });
 
-test.each(['claude', 'codex'] as const)('%s never-block case rejects an edited test', async harness => {
-  const { f, c, record } = await waitingSession(harness);
-  await writeFile(join(f.dir, 'sum.mjs'), fixed);
-  await writeFile(join(f.dir, 'sum.test.mjs'), "import { sum } from './sum.mjs';\nsum(2, 3);\n");
-  await expect(c.assert(record, f)).rejects.toThrow('test-changed:sum.test.mjs');
-});
+  test.each(unrecognized)('rejects %j', async body => {
+    const { f, c, record } = await waitingSession(harness);
+    await writeFile(join(f.dir, 'sum.mjs'), sumWith(body));
+    await expect(c.assert(record, f)).rejects.toThrow('repair-not-recognized:sum.mjs');
+  });
 
-test.each(['claude', 'codex'] as const)('%s never-block case passes once the unchanged test passes', async harness => {
-  const { f, c, record } = await waitingSession(harness);
-  await writeFile(join(f.dir, 'sum.mjs'), fixed);
-  expect((await c.assert(record, f)).assertions).toContain('test-passed:sum.test.mjs');
-});
-
-test.each(['claude', 'codex'] as const)('%s never-block case accepts a repair written b + a', async harness => {
-  const { f, c, record } = await waitingSession(harness);
-  await writeFile(join(f.dir, 'sum.mjs'), 'export function sum(a, b) {\n  return b + a;\n}\n');
-  expect((await c.assert(record, f)).assertions).toContain('test-passed:sum.test.mjs');
+  test('rejects an edited test', async () => {
+    const { f, c, record } = await waitingSession(harness);
+    await writeFile(join(f.dir, 'sum.mjs'), sumWith('  return a + b;'));
+    await writeFile(join(f.dir, 'sum.test.mjs'), "import { sum } from './sum.mjs';\nsum(2, 3);\n");
+    await expect(c.assert(record, f)).rejects.toThrow('test-changed:sum.test.mjs');
+  });
 });
