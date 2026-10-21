@@ -593,7 +593,7 @@ const nativeAgents: Case = {
   async prepare(f) {
     for (const agent of NATIVE_AGENTS) await writeFile(join(f.dir, `${agent}.nonce`), `${crypto.randomUUID()}\n`);
   },
-  prompt: f => `Do no engineering work. ${NATIVE_AGENTS.map(agent => `Use the Agent tool once with subagent_type pstack:${agent} and run_in_background false, and give it exactly this task: "Read ${join(f.dir, `${agent}.nonce`)} and write its exact contents to ${join(f.dir, `${agent}.out`)}. Then reply with those exact contents as your final answer. Do nothing else."`).join(' ')} Send both Agent calls in one message, wait for both reports, then reply DONE. ${rules(f.dir)}`,
+  prompt: f => `Do no engineering work. ${NATIVE_AGENTS.map(agent => `Use the Agent tool once with subagent_type pstack:${agent} and run_in_background false, and give it exactly this task: "Read ${join(f.dir, `${agent}.nonce`)} and write its exact contents to ${join(f.dir, `${agent}.out`)}. Then reply with those exact contents as your final answer. Do nothing else."`).join(' ')} Send all of these Agent calls in one message, wait for every report, then reply DONE. ${rules(f.dir)}`,
   async assert(record, f) {
     const assertions: string[] = [];
     for (const agent of NATIVE_AGENTS) {
