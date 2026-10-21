@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { execFileSync } from 'node:child_process';
 import { resolve } from 'node:path';
 import registryData from '../features/registry.json';
+import { recipe } from '../features/recipes.ts';
 import { classify, completeEvidence, matches, newReceipt, requiredFeatures, requiredHarnesses, validateRegistry } from './core.ts';
 import { HARNESSES, type Receipt } from './types.ts';
 import codexManifest from '../../../../plugins/pstack/.codex-plugin/plugin.json';
@@ -180,6 +181,35 @@ describe('registry and ownership', () => {
     expect(r.selection.features).toEqual(both('project-skill'));
     evidence(r);
     expect(() => completeEvidence(r)).not.toThrow();
+  });
+  test('the shared recipe implementation reaches every implemented recipe and preserves project proof', () => {
+    const path = '.claude/skills/verify-open-pstack/features/recipes.ts';
+    const expected = [...both('catalog', 'setup', 'runner', 'shipped-tools', 'hook:startup', 'project-skill',
+      ...registry.skills.map(skill => `skill-invocation:${skill}`)), 'claude:agent-preload:poteto-agent'].sort();
+    for (const file of [{ filename: path }, { filename: 'docs/moved.md', previous_filename: path }]) {
+      const s = classify([file], registry);
+      expect(s.features).toEqual(expected);
+      expect(s.skills).toEqual([...registry.skills].sort());
+      expect(s.noRuntime).toBe(false);
+      for (const harness of HARNESSES) {
+        for (const feature of s.features.filter(f => f.startsWith(`${harness}:`))) {
+          expect(recipe(feature.slice(harness.length + 1), harness).length).toBeGreaterThan(0);
+        }
+      }
+    }
+  });
+  test('nearby verifier documentation retains only project proof', () => {
+    for (const filename of ['.claude/skills/verify-open-pstack/features/README.md',
+      '.claude/skills/verify-open-pstack/features/skill-invocation.md']) {
+      expect(classify([{ filename }], registry).features).toEqual(both('project-skill'));
+    }
+  });
+  test('shared recipe expansion survives overlapping catalog ownership without broadening ordinary catalog paths', () => {
+    const path = '.claude/skills/verify-open-pstack/features/recipes.ts';
+    const overlapping = { ...registry, catalog: [...registry.catalog, path], shared: [...registry.shared, path] };
+    expect(classify([{ filename: path }], overlapping)).toEqual(classify([{ filename: path }], registry));
+    const catalog = registry.catalog[0]!;
+    expect(classify([{ filename: catalog }], overlapping)).toEqual(classify([{ filename: catalog }], registry));
   });
   test('ordinary repository documentation selects no harnesses', () => {
     const s = classify([{ filename: 'README.md' }, { filename: 'docs/guide.md' }], registry);

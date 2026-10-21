@@ -99,6 +99,7 @@ Read receipts as data, never shell input. Do not put credentials in prompts or p
 - scripts/provenance.test.ts
 - scripts/provenance.ts
 - scripts/reflect.test.ts
+- scripts/skill-invocation.test.ts
 - scripts/types.ts
 - scripts/verify.sh
 - scripts/verify.test.ts
