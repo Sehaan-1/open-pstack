@@ -587,8 +587,6 @@ const CATALOG_LANES: Record<string, [string, string]> = {
   'interrogate reviewers': ['opencode:opencode/deepseek-v4.1-flash-free@max', 'opencode:opencode/deepseek-v4.1-flash-free@max'],
   [WRITER_ROLE]: [WRITER_LANE, WRITER_LANE],
 };
-// Each listed generated agent runs natively: the child reads a fixture nonce and writes it to its own output file.
-// The Agent call returns only a launch notice, so the evidence is the child's recorded tool calls and the nonce it wrote.
 const NATIVE_AGENTS = ['pstack-sonnet-max', 'pstack-opus-5-5-max', 'pstack-haiku-5-5-max'];
 const nativeAgents: Case = {
   id: 'native-agents',
