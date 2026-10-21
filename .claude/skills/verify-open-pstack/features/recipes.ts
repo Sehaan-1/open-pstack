@@ -431,7 +431,7 @@ const setup: Case[] = [{
   codexSandbox: 'danger-full-access',
   claudePermission: 'bypassPermissions',
   prepare: unconfigured,
-  prompt: f => `${firstRunPrompt(f)} Decline the verification-skill offer and accept the formal verification offer. When the formal verification skill loads, stop at once without doing its work and reply with exactly ACCEPT-ROUTED as your final message.`,
+  prompt: f => `${firstRunPrompt(f)} Decline the offer to run /create-verification-skill. Accept any other offer setup makes. When the skill that offer starts loads, stop at once without doing its work and reply with exactly ACCEPT-ROUTED as your final message.`,
   async assert(record, f) {
     const assertions = [loaded(record, 'pstack:setup-pstack')];
     const injected = record.skills.slice(record.skills.indexOf('pstack:setup-pstack') + 1).some(isFormalCreator);

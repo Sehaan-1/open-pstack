@@ -411,7 +411,8 @@ for (const harness of ['claude', 'codex'] as const) {
     await expect(readFile(join(f.dir, 'pstack-models.md'))).rejects.toThrow();
     if (harness === 'codex') await expect(readFile(join(f.dir, 'AGENTS.md'))).rejects.toThrow();
     expect(c.prompt(f)).toContain('Keep the first-run role assignments and every proposed effort. I confirm every write.');
-    expect(c.prompt(f)).toEndWith('Decline the verification-skill offer and accept the formal verification offer. When the formal verification skill loads, stop at once without doing its work and reply with exactly ACCEPT-ROUTED as your final message.');
+    expect(c.prompt(f)).not.toMatch(/formal/i);
+    expect(c.prompt(f)).toEndWith('Decline the offer to run /create-verification-skill. Accept any other offer setup makes. When the skill that offer starts loads, stop at once without doing its work and reply with exactly ACCEPT-ROUTED as your final message.');
     const creator = 'pstack:create-formal-verification-skill';
     const routed = (skills: string[], reply = 'ACCEPT-ROUTED'): SessionRecord => ({ ...record(harness, 'pstack:setup-pstack'), skills, reply });
     expect((await c.assert(routed(['pstack:setup-pstack', creator]), f)).assertions)
