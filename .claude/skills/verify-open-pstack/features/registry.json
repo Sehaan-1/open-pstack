@@ -1,8 +1,9 @@
 {
   "skills": [
     "architect", "arena", "automate-me", "babysit", "benchmark-checklist", "blast-radius", "bro", "correct",
-    "create-verification-skill", "deslop", "figure-it-out", "fix-ci", "fix-merge-conflicts",
-    "get-pr-comments", "how", "in-your-own-words", "interrogate", "ketchup", "maintain-verification-skill",
+    "create-formal-verification-skill", "create-verification-skill", "deslop", "figure-it-out",
+    "fix-ci", "fix-merge-conflicts", "get-pr-comments", "how", "in-your-own-words", "interrogate",
+    "ketchup", "maintain-formal-verification-skill", "maintain-verification-skill",
     "make-pr-easy-to-review", "no-comments", "poteto-help", "poteto-mode",
     "principle-attack-the-premise", "principle-boundary-discipline", "principle-build-the-lever",
     "principle-encode-lessons-in-structure", "principle-exhaust-the-design-space",
