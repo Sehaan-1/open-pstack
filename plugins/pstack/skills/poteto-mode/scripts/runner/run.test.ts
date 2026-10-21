@@ -17,13 +17,13 @@ import { dirname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { childEnvironment, discoverSharedGitDir, runLane } from "./run.ts";
 import { main } from "./cli.ts";
-import { type LaneRequest, resolveLane } from "./registry/index.ts";
-import type { Lane, ProviderAdapter } from "./registry/contract.ts";
+import { type LaneRequest, REGISTRY, resolveLane } from "./registry/index.ts";
+import { access, type Lane, type ProviderAdapter } from "./registry/contract.ts";
 import { devin } from "./providers/devin.ts";
 import { opencode } from "./providers/opencode.ts";
 import { BASE_ALLOWLIST, BASE_PREFIXES } from "./providers/shared.ts";
 import type { ProviderId } from "./registry/family.ts";
-import type { RunnerReceipt } from "./types.ts";
+import type { AccessKind, RunnerReceipt } from "./types.ts";
 
 let scratch = "";
 let bin = "";
@@ -2036,6 +2036,51 @@ describe("childEnvironment", () => {
     const grokOnly = ["GROK_HOME", "XAI_API_KEY"];
     expect(Object.keys(childEnvironment(laneOf(options("grok")), source)).sort())
       .toEqual([...Object.keys(kept), ...grokOnly].sort());
+  });
+
+  it("passes each allowlist adapter only its own provider credentials in every mode it supports", () => {
+    const source = {
+      GROK_API_KEY: "grok",
+      XAI_API_KEY: "xai",
+      AMP_API_KEY: "amp",
+      CURSOR_API_KEY: "cursor",
+      CURSOR_AUTH_TOKEN: "cursor-token",
+      DEEPSEEK_API_KEY: "deepseek",
+      OPENAI_API_KEY: "openai",
+      ANTHROPIC_API_KEY: "anthropic",
+      OPENROUTER_API_KEY: "openrouter",
+      GEMINI_API_KEY: "gemini",
+      UNRELATED_SECRET: "unrelated",
+    };
+    const expected: Record<string, Partial<Record<AccessKind, readonly string[]>>> = {
+      grok: { "read-only": ["GROK_API_KEY", "XAI_API_KEY"], "isolated-write": ["GROK_API_KEY", "XAI_API_KEY"] },
+      devin: { "read-only": [] },
+      opencode: { "read-only": [] },
+      dsh: { "read-only": ["DEEPSEEK_API_KEY"] },
+      amp: { "read-only": ["AMP_API_KEY"] },
+      agy: { "read-only": [] },
+      cursor: { "read-only": ["CURSOR_API_KEY", "CURSOR_AUTH_TOKEN"] },
+    };
+    const allowlisted = REGISTRY.adapters
+      .filter((adapter) => adapter.environment(access("read-only"), "/sidecar").kind === "allowlist");
+    expect(allowlisted.map((adapter) => adapter.id).sort()).toEqual(Object.keys(expected).sort());
+    for (const adapter of allowlisted) {
+      const family = REGISTRY.families.find((entry) => entry.provider === adapter.id)!;
+      expect(Object.keys(expected[adapter.id]!)).toEqual([...adapter.launch.supports]);
+      for (const kind of adapter.launch.supports) {
+        const lane = laneOf({
+          ...options("grok", `allowlist-${adapter.id}-${kind}`),
+          provider: adapter.id,
+          model: family.model,
+          effort: family.defaultEffort,
+          mode: kind === "read-only" ? "read-only" : "isolated-write",
+          ...(kind === "isolated-write-full-access" ? { writerSandbox: "full-access" } : {}),
+        });
+        const inherited = Object.keys(childEnvironment(lane, source)).filter((name) => name in source);
+        expect({ [`${adapter.id} ${kind}`]: inherited.sort() })
+          .toEqual({ [`${adapter.id} ${kind}`]: [...expected[adapter.id]![kind]!] });
+      }
+    }
   });
 
   it("drops GIT_* only for a Claude writer", () => {
