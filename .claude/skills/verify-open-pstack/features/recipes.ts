@@ -432,9 +432,10 @@ const setup: Case[] = [{
   claudePermission: 'bypassPermissions',
   prepare: unconfigured,
   prompt: f => `${firstRunPrompt(f)} Decline the verification-skill offer and accept the formal verification offer. When the formal verification skill loads, stop at once without doing its work and reply with exactly ACCEPT-ROUTED as your final message.`,
-  async assert(record) {
+  async assert(record, f) {
     const assertions = [loaded(record, 'pstack:setup-pstack')];
-    if (!record.skills.slice(record.skills.indexOf('pstack:setup-pstack') + 1).some(isFormalCreator)) throw new Error('skill-not-routed:create-formal-verification-skill');
+    const injected = record.skills.slice(record.skills.indexOf('pstack:setup-pstack') + 1).some(isFormalCreator);
+    if (!injected && !(f.harness === 'codex' && await readInstalledCreator(record, f))) throw new Error('skill-not-routed:create-formal-verification-skill');
     return { assertions: [...assertions, 'routed:create-formal-verification-skill', ended(record, 'ACCEPT-ROUTED', 'accept-formal-offer-did-not-finish')], files: [] };
   },
 }];
@@ -442,6 +443,14 @@ const setup: Case[] = [{
 const DECLINE_EXEMPT = new Set(['keep-setting', 'accept-formal-offer']);
 const isFormalCreator = (skill: string): boolean =>
   skill === 'pstack:create-formal-verification-skill' || skill.endsWith('/create-formal-verification-skill/SKILL.md');
+
+const CREATOR_SKILL_FILE = '/skills/create-formal-verification-skill/SKILL.md', CREATOR_NAME_LINE = 'name: create-formal-verification-skill';
+async function readInstalledCreator(record: SessionRecord, f: Fixture): Promise<boolean> {
+  const home = await realpath(f.configHome);
+  const paths = [f.location + CREATOR_SKILL_FILE];
+  if (f.location.startsWith(`${home}/`)) paths.push(`$CODEX_HOME${f.location.slice(home.length)}${CREATOR_SKILL_FILE}`);
+  return record.tools.some(t => !t.failed && paths.some(path => String(t.input.command).includes(path)) && !!t.result?.split('\n').includes(CREATOR_NAME_LINE));
+}
 
 async function unconfigured(f: Fixture): Promise<void> {
   await rm(join(f.configHome, 'pstack-models.md'), { force: true });

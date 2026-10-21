@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { readCatalog, recipe, type Case, type Catalog, type Fixture } from '../features/recipes.ts';
+import { parseSession } from './harness.ts';
 import { command } from './io.ts';
 import type { Harness, SessionRecord } from './types.ts';
 
@@ -411,7 +412,7 @@ for (const harness of ['claude', 'codex'] as const) {
     if (harness === 'codex') await expect(readFile(join(f.dir, 'AGENTS.md'))).rejects.toThrow();
     expect(c.prompt(f)).toContain('Keep the first-run role assignments and every proposed effort. I confirm every write.');
     expect(c.prompt(f)).toEndWith('Decline the verification-skill offer and accept the formal verification offer. When the formal verification skill loads, stop at once without doing its work and reply with exactly ACCEPT-ROUTED as your final message.');
-    const creator = harness === 'claude' ? 'pstack:create-formal-verification-skill' : '/plugins/pstack/skills/create-formal-verification-skill/SKILL.md';
+    const creator = 'pstack:create-formal-verification-skill';
     const routed = (skills: string[], reply = 'ACCEPT-ROUTED'): SessionRecord => ({ ...record(harness, 'pstack:setup-pstack'), skills, reply });
     expect((await c.assert(routed(['pstack:setup-pstack', creator]), f)).assertions)
       .toEqual(['skill-loaded', 'routed:create-formal-verification-skill', 'ended:ACCEPT-ROUTED']);
@@ -421,6 +422,27 @@ for (const harness of ['claude', 'codex'] as const) {
     await expect(c.assert(routed(['pstack:setup-pstack', creator], 'Want a formal verification skill?'), f)).rejects.toThrow('accept-formal-offer-did-not-finish');
   });
 }
+
+test('codex: accept-formal-offer counts a successful read of this run\'s installed creator as the handoff, and nothing weaker', async () => {
+  const base = await fixture('codex'), installed = join(base.dir, 'plugins/cache/open-pstack/pstack/1.16.0'), f = { ...base, location: installed };
+  const c = recipe('setup', 'codex').find(c => c.id === 'accept-formal-offer')!;
+  const rollout = JSON.stringify({ type: 'response_item', payload: { type: 'message', role: 'user', content: [{ type: 'input_text',
+    text: `<skill>\n<name>pstack:setup-pstack</name>\n<path>${installed}/skills/setup-pstack/SKILL.md</path>\n---\nname: setup-pstack\n---\n</skill>` }] } });
+  const frontmatter = '---\nname: create-formal-verification-skill\ndescription: "Generate a project-local skill that formally verifies the code."\n---\n\n# Create a formal verification skill\n';
+  const read = (path: string, output = frontmatter, exitCode = 0) => ({ type: 'item.completed', item: { id: 'item_19', type: 'command_execution',
+    command: `/bin/zsh -lc 'cat "${path}" '`, aggregated_output: output, exit_code: exitCode, status: exitCode ? 'failed' : 'completed' } });
+  const done = { type: 'item.completed', item: { id: 'item_20', type: 'agent_message', text: 'ACCEPT-ROUTED' } };
+  const session = (...events: object[]) => parseSession('codex', events.map(e => JSON.stringify(e)).join('\n'), 0, 0, rollout);
+  const suffix = 'skills/create-formal-verification-skill/SKILL.md', viaHome = `$CODEX_HOME/plugins/cache/open-pstack/pstack/1.16.0/${suffix}`;
+  for (const path of [viaHome, join(installed, suffix)]) {
+    expect(session(read(path), done).skills).toEqual(['pstack:setup-pstack']);
+    expect((await c.assert(session(read(path), done), f)).assertions).toEqual(['skill-loaded', 'routed:create-formal-verification-skill', 'ended:ACCEPT-ROUTED']);
+  }
+  for (const events of [[read(viaHome, frontmatter, 1), done], [read(`$CODEX_HOME/plugins/cache/other/pstack/1.16.0/${suffix}`), done],
+    [read(join(base.dir, 'elsewhere', suffix)), done], [read(viaHome, '# Create a formal verification skill\n'), done], [done]]) {
+    await expect(c.assert(session(...events), f)).rejects.toThrow('skill-not-routed:create-formal-verification-skill');
+  }
+});
 
 const FAKE_CODEX = `#!/bin/sh
 if [ "$1" = "login" ]; then echo 'Logged in using ChatGPT'; exit 0; fi
