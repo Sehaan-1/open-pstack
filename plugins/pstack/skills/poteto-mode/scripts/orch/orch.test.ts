@@ -10,7 +10,7 @@ import {
 } from "node:fs/promises";
 import { realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { delimiter, join } from "node:path";
 import {
   NotFoundError,
   UserError,
@@ -172,6 +172,7 @@ async function withFakeForge<T>({
 }): Promise<T> {
   const bin = join(directory, "bin");
   const outputPath = join(directory, "forge-output.txt");
+  const callsPath = join(directory, "forge-calls");
   await mkdir(bin, { recursive: true });
   await writeFile(
     outputPath,
@@ -179,49 +180,59 @@ async function withFakeForge<T>({
       currentRows ??
       forgeRows(forge, [
         {
+          number: 10,
+          state: "merged",
+          head: "stack/merged",
+          base: "main",
+        },
+        {
+          number: 13,
+          state: "closed",
+          head: "stack/closed",
+          base: "stack/merged",
+        },
+        {
           number: 11,
           state: "open",
           head: "stack/open",
           base: "stack/closed",
         },
+        {
+          number: 14,
+          state: "draft",
+          head: "stack/draft",
+          base: "stack/open",
+        },
+        {
+          number: 15,
+          state: "closed",
+          head: "stack/abandoned",
+          base: "stack/open",
+        },
       ])
     }\n`
   );
   const { fields } = FORGE_FIXTURES[forge];
-  const list = (filter: string, branch: string): string =>
-    `pr list ${filter} ${branch} --state all --json ${fields}`;
+  const expectedArgv =
+    forge === "gh"
+      ? `pr list --state all --limit 300 --json ${fields}`
+      : `pr list --state all --json ${fields}`;
   const fake = join(bin, forge);
+  const repoDir = realpathSync(join(directory, "repo"));
   await writeFile(
     fake,
     `#!/usr/bin/env bash
 set -euo pipefail
-if [ "$(pwd -P)" != "${realpathSync(join(directory, "repo"))}" ]; then
-  printf '${forge} ran outside the fixture repo: %s\\n' "$(pwd -P)" >&2
+current_dir="$(pwd -P)"
+expected_dir="${repoDir.replace(/\\/g, "/")}"
+if [ "$current_dir" != "$expected_dir" ] && [ "$(pwd -W 2>/dev/null || true)" != "$expected_dir" ]; then
+  printf '${forge} ran outside the fixture repo: %s\\n' "$current_dir" >&2
   exit 2
 fi
 case "$*" in
-  "${list("--head", "stack/open")}")
-    cat "${outputPath}"
-    ;;
-  "${list("--head", "stack/closed")}")
-    printf '%s\\n' '${forgeRows(forge, [{ number: 13, state: "closed", head: "stack/closed", base: "stack/merged" }])}'
-    ;;
-  "${list("--head", "stack/merged")}")
-    printf '%s\\n' '${forgeRows(forge, [{ number: 10, state: "merged", head: "stack/merged", base: "main" }])}'
-    ;;
-  "${list("--base", "stack/open")}")
-    printf '%s\\n' '${forgeRows(forge, [
-      { number: 14, state: "draft", head: "stack/draft", base: "stack/open" },
-      {
-        number: 15,
-        state: "closed",
-        head: "stack/abandoned",
-        base: "stack/open",
-      },
-    ])}'
-    ;;
-  "${list("--base", "stack/draft")}")
-    printf '[]\\n'
+  "${expectedArgv}")
+    printf 'x' >> "${callsPath.replace(/\\/g, "/")}"
+    cat "${outputPath.replace(/\\/g, "/")}"
     ;;
   *)
     printf 'unexpected ${forge} arguments: %s\\n' "$*" >&2
@@ -232,8 +243,16 @@ esac
   );
   await chmod(fake, 0o755);
 
+  if (process.platform === "win32") {
+    const gitBash = "C:\\Program Files\\Git\\bin\\bash.exe";
+    await writeFile(
+      join(bin, `${forge}.cmd`),
+      `@"${gitBash}" "${fake.replace(/\\/g, "/")}" %*\r\n`
+    );
+  }
+
   const originalPath = process.env.PATH;
-  process.env.PATH = `${bin}:${originalPath ?? ""}`;
+  process.env.PATH = `${bin}${delimiter}${originalPath ?? ""}`;
   try {
     return await operation();
   } finally {
@@ -420,7 +439,9 @@ describe("Store", () => {
 
   it("replaces a stale lock whose holder pid is dead", async () => {
     const { directory } = await initializedStore();
-    const exited = Bun.spawn(["true"]);
+    const exited = Bun.spawn(
+      process.platform === "win32" ? [process.execPath, "-e", ""] : ["true"]
+    );
     await exited.exited;
     await writeFile(join(directory, ".orch.lock"), `${exited.pid}\n`);
 
@@ -535,6 +556,9 @@ describe("Store", () => {
             lowestUnmerged: 11,
           });
           expect(
+            (await readFile(join(directory, "forge-calls"), "utf8")).length
+          ).toBe(1);
+          expect(
             (
               await store.frontier.set({
                 repo: stack.repo,
@@ -542,6 +566,9 @@ describe("Store", () => {
                 prs: [10, 13, 11, 14],
               })
             ).generation
+          ).toBe(2);
+          expect(
+            (await readFile(join(directory, "forge-calls"), "utf8")).length
           ).toBe(2);
           expect((await store.frontier.show()).generation).toBe(2);
           await expect(
@@ -585,7 +612,7 @@ describe("Store", () => {
           await expect(
             store.frontier.set({ repo: stack.repo, forge })
           ).rejects.toThrow(
-            `${forge} pr list --head stack/open output is not valid JSON`
+            `${forge} pr list output is not valid JSON`
           );
         },
       });
@@ -604,6 +631,231 @@ describe("Store", () => {
         await expect(store.frontier.set({ repo: stack.repo })).rejects.toThrow(
           "branch stack/open has no pull request; open one with gh pr create"
         );
+      },
+    });
+  });
+
+  it("rejects multiple pull requests for a single head branch", async () => {
+    const { directory, store } = await initializedStore();
+    const stack = await makeGitStack(directory);
+
+    await withFakeForge({
+      directory,
+      forge: "gh",
+      currentRows: JSON.stringify([
+        {
+          number: 11,
+          state: "OPEN",
+          headRefName: "stack/open",
+          baseRefName: "stack/closed",
+        },
+        {
+          number: 12,
+          state: "OPEN",
+          headRefName: "stack/open",
+          baseRefName: "stack/closed",
+        },
+      ]),
+      operation: async () => {
+        await expect(store.frontier.set({ repo: stack.repo })).rejects.toThrow(
+          "branch stack/open has multiple pull requests (#11, #12); close the stale ones first"
+        );
+      },
+    });
+  });
+
+  it("rejects non-linear stacks when multiple open PRs target the same base", async () => {
+    const { directory, store } = await initializedStore();
+    const stack = await makeGitStack(directory);
+
+    await withFakeForge({
+      directory,
+      forge: "gh",
+      currentRows: JSON.stringify([
+        {
+          number: 10,
+          state: "MERGED",
+          headRefName: "stack/merged",
+          baseRefName: "main",
+        },
+        {
+          number: 13,
+          state: "CLOSED",
+          headRefName: "stack/closed",
+          baseRefName: "stack/merged",
+        },
+        {
+          number: 11,
+          state: "OPEN",
+          headRefName: "stack/open",
+          baseRefName: "stack/closed",
+        },
+        {
+          number: 14,
+          state: "OPEN",
+          headRefName: "stack/draft",
+          baseRefName: "stack/open",
+        },
+        {
+          number: 16,
+          state: "OPEN",
+          headRefName: "stack/other",
+          baseRefName: "stack/open",
+        },
+        {
+          number: 15,
+          state: "CLOSED",
+          headRefName: "stack/abandoned",
+          baseRefName: "stack/open",
+        },
+      ]),
+      operation: async () => {
+        await expect(store.frontier.set({ repo: stack.repo })).rejects.toThrow(
+          "stack is not linear: branches stack/draft, stack/other all target stack/open"
+        );
+      },
+    });
+  });
+
+  it("detects loops in the base chain in both walk directions", async () => {
+    const { directory, store } = await initializedStore();
+    const stack = await makeGitStack(directory);
+
+    await withFakeForge({
+      directory,
+      forge: "gh",
+      currentRows: JSON.stringify([
+        {
+          number: 11,
+          state: "OPEN",
+          headRefName: "stack/open",
+          baseRefName: "stack/closed",
+        },
+        {
+          number: 13,
+          state: "CLOSED",
+          headRefName: "stack/closed",
+          baseRefName: "stack/open",
+        },
+      ]),
+      operation: async () => {
+        await expect(store.frontier.set({ repo: stack.repo })).rejects.toThrow(
+          "pull request base chain loops at branch stack/open"
+        );
+      },
+    });
+
+    await withFakeForge({
+      directory,
+      forge: "gh",
+      currentRows: JSON.stringify([
+        {
+          number: 11,
+          state: "OPEN",
+          headRefName: "stack/open",
+          baseRefName: "main",
+        },
+        {
+          number: 14,
+          state: "OPEN",
+          headRefName: "stack/draft",
+          baseRefName: "stack/open",
+        },
+        {
+          number: 15,
+          state: "OPEN",
+          headRefName: "stack/draft",
+          baseRefName: "stack/draft",
+        },
+      ]),
+      operation: async () => {
+        await expect(store.frontier.set({ repo: stack.repo })).rejects.toThrow(
+          "pull request base chain loops at branch stack/draft"
+        );
+      },
+    });
+  });
+
+  it("rejects invalid PR rows in forge output", async () => {
+    const { directory, store } = await initializedStore();
+    const stack = await makeGitStack(directory);
+
+    await withFakeForge({
+      directory,
+      forge: "gh",
+      currentRows: JSON.stringify([
+        {
+          number: 11,
+          state: "OPEN",
+          headRefName: "stack/open",
+        },
+      ]),
+      operation: async () => {
+        await expect(store.frontier.set({ repo: stack.repo })).rejects.toThrow(
+          "gh pr list output has an invalid PR row"
+        );
+      },
+    });
+  });
+
+  it("fails closed when a resolved chain branch ref is missing locally", async () => {
+    const { directory, store } = await initializedStore();
+    const stack = await makeGitStack(directory);
+
+    git({ repo: stack.repo, args: ["branch", "-D", "stack/merged"] });
+
+    await withFakeForge({
+      directory,
+      forge: "gh",
+      operation: async () => {
+        await expect(store.frontier.set({ repo: stack.repo })).rejects.toThrow(
+          /git rev-parse.*failed|git rev-parse stack\/merged returned an invalid SHA/
+        );
+      },
+    });
+  });
+
+  it("short-circuits when current branch is trunk without calling the forge", async () => {
+    const { directory, store } = await initializedStore();
+    const stack = await makeGitStack(directory);
+
+    git({ repo: stack.repo, args: ["checkout", "main"] });
+
+    await withFakeForge({
+      directory,
+      forge: "gh",
+      operation: async () => {
+        const result = await store.frontier.set({ repo: stack.repo });
+        expect(result.prs).toEqual([]);
+        await expect(
+          readFile(join(directory, "forge-calls"), "utf8")
+        ).rejects.toThrow();
+      },
+    });
+  });
+
+  it("enforces forge-specific argv contracts between gh and origin", async () => {
+    const { directory, store } = await initializedStore();
+    const stack = await makeGitStack(directory);
+
+    await withFakeForge({
+      directory,
+      forge: "gh",
+      operation: async () => {
+        const res = await store.frontier.set({ repo: stack.repo, forge: "gh" });
+        expect(res.prs).toHaveLength(4);
+      },
+    });
+
+    await withFakeForge({
+      directory,
+      forge: "origin",
+      operation: async () => {
+        const res = await store.frontier.set({
+          repo: stack.repo,
+          forge: "origin",
+        });
+        expect(res.prs).toHaveLength(4);
       },
     });
   });

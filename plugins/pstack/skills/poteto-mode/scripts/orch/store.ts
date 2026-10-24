@@ -975,6 +975,7 @@ interface ForgePullRequestQuery {
   readonly headField: string;
   readonly baseField: string;
   readonly states: ReadonlyMap<string, FrontierPrState>;
+  readonly listLimit?: number;
 }
 
 const FORGE_PULL_REQUEST_QUERIES: Readonly<
@@ -989,6 +990,7 @@ const FORGE_PULL_REQUEST_QUERIES: Readonly<
       ["MERGED", "MERGED"],
       ["CLOSED", "CLOSED"],
     ]),
+    listLimit: 300,
   },
   origin: {
     stateField: "status",
@@ -1040,37 +1042,27 @@ function runTool({
   }
 }
 
-function listPullRequests({
-  filter,
-  branch,
+function listAllPullRequests({
   forge,
   repo,
 }: {
-  filter: "--head" | "--base";
-  branch: string;
   forge: Forge;
   repo: string;
 }): readonly ForgePullRequest[] {
   const query = FORGE_PULL_REQUEST_QUERIES[forge];
-  const command = `${forge} pr list ${filter} ${branch}`;
-  // Every state is fetched because a merged or closed PR still anchors the
-  // chain, and a draft counts as OPEN.
-  const raw = runTool({
-    command: forge,
-    args: [
-      "pr",
-      "list",
-      filter,
-      branch,
-      "--state",
-      "all",
-      "--json",
-      ["number", query.stateField, query.headField, query.baseField].join(
-        ","
-      ),
-    ],
-    repo,
-  });
+  const command = `${forge} pr list`;
+  const argv: string[] = [
+    "pr",
+    "list",
+    "--state",
+    "all",
+    ...(query.listLimit === undefined
+      ? []
+      : ["--limit", String(query.listLimit)]),
+    "--json",
+    ["number", query.stateField, query.headField, query.baseField].join(","),
+  ];
+  const raw = runTool({ command: forge, args: argv, repo });
   let value: unknown;
   try {
     value = JSON.parse(raw);
@@ -1103,16 +1095,29 @@ function listPullRequests({
   });
 }
 
-function branchPullRequest({
-  branch,
-  forge,
-  repo,
-}: {
-  branch: string;
-  forge: Forge;
-  repo: string;
-}): ForgePullRequest {
-  const rows = listPullRequests({ filter: "--head", branch, forge, repo });
+interface PrGraph {
+  readonly byHead: ReadonlyMap<string, readonly ForgePullRequest[]>;
+  readonly openByBase: ReadonlyMap<string, readonly ForgePullRequest[]>;
+}
+
+function buildPrGraph(rows: readonly ForgePullRequest[]): PrGraph {
+  const byHead = new Map<string, ForgePullRequest[]>();
+  const openByBase = new Map<string, ForgePullRequest[]>();
+  for (const row of rows) {
+    (byHead.get(row.branch) ?? byHead.set(row.branch, []).get(row.branch)!).push(row);
+    if (row.state === "OPEN") {
+      (openByBase.get(row.base) ?? openByBase.set(row.base, []).get(row.base)!).push(row);
+    }
+  }
+  return { byHead, openByBase };
+}
+
+function headPrFor(
+  graph: PrGraph,
+  branch: string,
+  forge: Forge
+): ForgePullRequest {
+  const rows = graph.byHead.get(branch) ?? [];
   const row = rows[0];
   if (row === undefined) {
     throw new UserError(
@@ -1127,18 +1132,11 @@ function branchPullRequest({
   return row;
 }
 
-function openChildren({
-  branch,
-  forge,
-  repo,
-}: {
-  branch: string;
-  forge: Forge;
-  repo: string;
-}): readonly ForgePullRequest[] {
-  return listPullRequests({ filter: "--base", branch, forge, repo }).filter(
-    (row) => row.state === "OPEN"
-  );
+function openChildrenOf(
+  graph: PrGraph,
+  branch: string
+): readonly ForgePullRequest[] {
+  return graph.openByBase.get(branch) ?? [];
 }
 
 function runGit({
@@ -1151,18 +1149,32 @@ function runGit({
   return runTool({ command: "git", args, repo }).trim();
 }
 
-function branchSha({
-  branch,
-  repo,
-}: {
-  branch: string;
-  repo: string;
-}): string {
-  const sha = runGit({ args: ["rev-parse", branch], repo });
-  if (!/^[0-9a-f]{40,64}$/i.test(sha)) {
-    throw new UserError(`git rev-parse ${branch} returned an invalid SHA`);
+function parseRevParseLines(
+  branches: readonly string[],
+  raw: string
+): string[] {
+  const lines = raw.trim().split(/\r?\n/);
+  if (lines.length !== branches.length) {
+    throw new UserError(
+      `git rev-parse ${branches.join(" ")} returned ${lines.length} SHAs for ${branches.length} branches`
+    );
   }
-  return sha;
+  return lines.map((sha, index) => {
+    if (!/^[0-9a-f]{40,64}$/i.test(sha)) {
+      throw new UserError(
+        `git rev-parse ${branches[index]} returned an invalid SHA`
+      );
+    }
+    return sha;
+  });
+}
+
+function branchShas(args: {
+  readonly branches: readonly string[];
+  readonly repo: string;
+}): string[] {
+  const raw = runGit({ args: ["rev-parse", ...args.branches], repo: args.repo });
+  return parseRevParseLines(args.branches, raw);
 }
 
 function currentBranch(repo: string): string {
@@ -1187,8 +1199,9 @@ function resolveFrontier(repo: string, forge: Forge): readonly FrontierPr[] {
   if (current === trunk) {
     return [];
   }
+  const graph = buildPrGraph(listAllPullRequests({ forge, repo }));
   const seen = new Set([current]);
-  let bottom = branchPullRequest({ branch: current, forge, repo });
+  let bottom = headPrFor(graph, current, forge);
   const chain = [bottom];
   while (bottom.base !== trunk) {
     if (seen.has(bottom.base)) {
@@ -1197,12 +1210,12 @@ function resolveFrontier(repo: string, forge: Forge): readonly FrontierPr[] {
       );
     }
     seen.add(bottom.base);
-    bottom = branchPullRequest({ branch: bottom.base, forge, repo });
+    bottom = headPrFor(graph, bottom.base, forge);
     chain.unshift(bottom);
   }
   let tip = current;
   for (;;) {
-    const children = openChildren({ branch: tip, forge, repo });
+    const children = openChildrenOf(graph, tip);
     const child = children[0];
     if (child === undefined) {
       break;
@@ -1226,10 +1239,11 @@ function resolveFrontier(repo: string, forge: Forge): readonly FrontierPr[] {
       "pull request base chain contains duplicate pull requests"
     );
   }
-  return chain.map((row) => ({
+  const shas = branchShas({ branches: chain.map((row) => row.branch), repo });
+  return chain.map((row, index) => ({
     pr: row.pr,
     branches: row.branch,
-    sha: branchSha({ branch: row.branch, repo }),
+    sha: shas[index]!,
     state: row.state,
   }));
 }
