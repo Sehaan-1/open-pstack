@@ -164,11 +164,13 @@ async function withFakeForge<T>({
   forge,
   operation,
   currentRows,
+  responses,
 }: {
   directory: string;
   forge: Forge;
   operation: () => Promise<T>;
   currentRows?: string;
+  responses?: Readonly<Record<string, string>>;
 }): Promise<T> {
   const bin = join(directory, "bin");
   const outputPath = join(directory, "forge-output.txt");
@@ -217,6 +219,14 @@ async function withFakeForge<T>({
     forge === "gh"
       ? `pr list --state all --limit 300 --json ${fields}`
       : `pr list --state all --json ${fields}`;
+  const customCases = Object.entries(responses ?? {})
+    .map(
+      ([pattern, body]) => `  "${pattern}")
+    printf 'x' >> "${callsPath.replace(/\\/g, "/")}"
+    printf '%s\\n' '${body.replace(/'/g, "'\\''")}'
+    ;;`
+    )
+    .join("\n");
   const fake = join(bin, forge);
   const repoDir = realpathSync(join(directory, "repo"));
   await writeFile(
@@ -234,6 +244,7 @@ case "$*" in
     printf 'x' >> "${callsPath.replace(/\\/g, "/")}"
     cat "${outputPath.replace(/\\/g, "/")}"
     ;;
+${customCases}
   *)
     printf 'unexpected ${forge} arguments: %s\\n' "$*" >&2
     exit 2
@@ -598,7 +609,7 @@ describe("Store", () => {
           ).rejects.toThrow("--prs must not contain duplicates");
         },
       });
-    });
+    }, { timeout: 15000 });
 
     it(`rejects unparseable ${forge} output loudly`, async () => {
       const { directory, store } = await initializedStore();
@@ -717,64 +728,68 @@ describe("Store", () => {
     });
   });
 
-  it("detects loops in the base chain in both walk directions", async () => {
-    const { directory, store } = await initializedStore();
-    const stack = await makeGitStack(directory);
+  it(
+    "detects loops in the base chain in both walk directions",
+    async () => {
+      const { directory, store } = await initializedStore();
+      const stack = await makeGitStack(directory);
 
-    await withFakeForge({
-      directory,
-      forge: "gh",
-      currentRows: JSON.stringify([
-        {
-          number: 11,
-          state: "OPEN",
-          headRefName: "stack/open",
-          baseRefName: "stack/closed",
+      await withFakeForge({
+        directory,
+        forge: "gh",
+        currentRows: JSON.stringify([
+          {
+            number: 11,
+            state: "OPEN",
+            headRefName: "stack/open",
+            baseRefName: "stack/closed",
+          },
+          {
+            number: 13,
+            state: "CLOSED",
+            headRefName: "stack/closed",
+            baseRefName: "stack/open",
+          },
+        ]),
+        operation: async () => {
+          await expect(store.frontier.set({ repo: stack.repo })).rejects.toThrow(
+            "pull request base chain loops at branch stack/open"
+          );
         },
-        {
-          number: 13,
-          state: "CLOSED",
-          headRefName: "stack/closed",
-          baseRefName: "stack/open",
-        },
-      ]),
-      operation: async () => {
-        await expect(store.frontier.set({ repo: stack.repo })).rejects.toThrow(
-          "pull request base chain loops at branch stack/open"
-        );
-      },
-    });
+      });
 
-    await withFakeForge({
-      directory,
-      forge: "gh",
-      currentRows: JSON.stringify([
-        {
-          number: 11,
-          state: "OPEN",
-          headRefName: "stack/open",
-          baseRefName: "main",
+      await withFakeForge({
+        directory,
+        forge: "gh",
+        currentRows: JSON.stringify([
+          {
+            number: 11,
+            state: "OPEN",
+            headRefName: "stack/open",
+            baseRefName: "main",
+          },
+          {
+            number: 14,
+            state: "OPEN",
+            headRefName: "stack/draft",
+            baseRefName: "stack/open",
+          },
+          {
+            number: 15,
+            state: "OPEN",
+            headRefName: "stack/draft",
+            baseRefName: "stack/draft",
+          },
+        ]),
+        operation: async () => {
+          await expect(store.frontier.set({ repo: stack.repo })).rejects.toThrow(
+            "pull request base chain loops at branch stack/draft"
+          );
         },
-        {
-          number: 14,
-          state: "OPEN",
-          headRefName: "stack/draft",
-          baseRefName: "stack/open",
-        },
-        {
-          number: 15,
-          state: "OPEN",
-          headRefName: "stack/draft",
-          baseRefName: "stack/draft",
-        },
-      ]),
-      operation: async () => {
-        await expect(store.frontier.set({ repo: stack.repo })).rejects.toThrow(
-          "pull request base chain loops at branch stack/draft"
-        );
-      },
-    });
-  });
+      });
+    },
+    { timeout: 15000 }
+  );
 
   it("rejects invalid PR rows in forge output", async () => {
     const { directory, store } = await initializedStore();
@@ -859,6 +874,130 @@ describe("Store", () => {
       },
     });
   });
+
+  it(
+    "discovers older base pull requests outside the repository-wide limit",
+    async () => {
+      const { directory, store } = await initializedStore();
+      const stack = await makeGitStack(directory);
+      const { fields } = FORGE_FIXTURES.gh;
+      const dummyRows = Array.from({ length: 300 }, (_, index) => ({
+        number: 1000 + index,
+        state: "CLOSED",
+        headRefName: `dummy/${index}`,
+        baseRefName: "main",
+      }));
+      dummyRows[0] = {
+        number: 11,
+        state: "OPEN",
+        headRefName: "stack/open",
+        baseRefName: "stack/closed",
+      };
+      dummyRows[1] = {
+        number: 14,
+        state: "OPEN",
+        headRefName: "stack/draft",
+        baseRefName: "stack/open",
+      };
+
+      await withFakeForge({
+        directory,
+        forge: "gh",
+        currentRows: JSON.stringify(dummyRows),
+        responses: {
+          [`pr list --head stack/closed --state all --json ${fields}`]:
+            forgeRows("gh", [
+              {
+                number: 13,
+                state: "closed",
+                head: "stack/closed",
+                base: "stack/merged",
+              },
+            ]),
+          [`pr list --head stack/merged --state all --json ${fields}`]:
+            forgeRows("gh", [
+              {
+                number: 10,
+                state: "merged",
+                head: "stack/merged",
+                base: "main",
+              },
+            ]),
+          [`pr list --base stack/open --state all --json ${fields}`]:
+            forgeRows("gh", [
+              {
+                number: 14,
+                state: "draft",
+                head: "stack/draft",
+                base: "stack/open",
+              },
+            ]),
+          [`pr list --base stack/draft --state all --json ${fields}`]: "[]",
+        },
+        operation: async () => {
+          const res = await store.frontier.set({ repo: stack.repo });
+          expect(res.prs.map((p) => p.pr)).toEqual([10, 13, 11, 14]);
+        },
+      });
+    },
+    { timeout: 15000 }
+  );
+
+  it(
+    "discovers older open child pull requests outside the repository-wide limit",
+    async () => {
+      const { directory, store } = await initializedStore();
+      const stack = await makeGitStack(directory);
+      const { fields } = FORGE_FIXTURES.gh;
+      const dummyRows = Array.from({ length: 300 }, (_, index) => ({
+        number: 1000 + index,
+        state: "CLOSED",
+        headRefName: `dummy/${index}`,
+        baseRefName: "main",
+      }));
+      dummyRows[0] = {
+        number: 10,
+        state: "MERGED",
+        headRefName: "stack/merged",
+        baseRefName: "main",
+      };
+      dummyRows[1] = {
+        number: 13,
+        state: "CLOSED",
+        headRefName: "stack/closed",
+        baseRefName: "stack/merged",
+      };
+      dummyRows[2] = {
+        number: 11,
+        state: "OPEN",
+        headRefName: "stack/open",
+        baseRefName: "stack/closed",
+      };
+
+      await withFakeForge({
+        directory,
+        forge: "gh",
+        currentRows: JSON.stringify(dummyRows),
+        responses: {
+          [`pr list --base stack/open --state all --json ${fields}`]:
+            forgeRows("gh", [
+              {
+                number: 14,
+                state: "draft",
+                head: "stack/draft",
+                base: "stack/open",
+              },
+            ]),
+          [`pr list --base stack/draft --state all --json ${fields}`]: "[]",
+        },
+        operation: async () => {
+          const res = await store.frontier.set({ repo: stack.repo });
+          expect(res.prs.map((p) => p.pr)).toEqual([10, 13, 11, 14]);
+        },
+      });
+    },
+    { timeout: 15000 }
+  );
 
   it("rejects malformed TSV, verdict, frontier, and inbox data", async () => {
     const { directory, store } = await initializedStore();

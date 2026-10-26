@@ -1042,27 +1042,11 @@ function runTool({
   }
 }
 
-function listAllPullRequests({
-  forge,
-  repo,
-}: {
-  forge: Forge;
-  repo: string;
-}): readonly ForgePullRequest[] {
-  const query = FORGE_PULL_REQUEST_QUERIES[forge];
-  const command = `${forge} pr list`;
-  const argv: string[] = [
-    "pr",
-    "list",
-    "--state",
-    "all",
-    ...(query.listLimit === undefined
-      ? []
-      : ["--limit", String(query.listLimit)]),
-    "--json",
-    ["number", query.stateField, query.headField, query.baseField].join(","),
-  ];
-  const raw = runTool({ command: forge, args: argv, repo });
+function parsePullRequestRows(
+  raw: string,
+  command: string,
+  query: ForgePullRequestQuery
+): readonly ForgePullRequest[] {
   let value: unknown;
   try {
     value = JSON.parse(raw);
@@ -1095,12 +1079,74 @@ function listAllPullRequests({
   });
 }
 
-interface PrGraph {
-  readonly byHead: ReadonlyMap<string, readonly ForgePullRequest[]>;
-  readonly openByBase: ReadonlyMap<string, readonly ForgePullRequest[]>;
+function listAllPullRequests({
+  forge,
+  repo,
+}: {
+  forge: Forge;
+  repo: string;
+}): {
+  readonly rows: readonly ForgePullRequest[];
+  readonly truncated: boolean;
+} {
+  const query = FORGE_PULL_REQUEST_QUERIES[forge];
+  const command = `${forge} pr list`;
+  const argv: string[] = [
+    "pr",
+    "list",
+    "--state",
+    "all",
+    ...(query.listLimit === undefined
+      ? []
+      : ["--limit", String(query.listLimit)]),
+    "--json",
+    ["number", query.stateField, query.headField, query.baseField].join(","),
+  ];
+  const raw = runTool({ command: forge, args: argv, repo });
+  const rows = parsePullRequestRows(raw, command, query);
+  const truncated =
+    query.listLimit !== undefined && rows.length >= query.listLimit;
+  return { rows, truncated };
 }
 
-function buildPrGraph(rows: readonly ForgePullRequest[]): PrGraph {
+function listBranchPullRequests({
+  filter,
+  branch,
+  forge,
+  repo,
+}: {
+  filter: "--head" | "--base";
+  branch: string;
+  forge: Forge;
+  repo: string;
+}): readonly ForgePullRequest[] {
+  const query = FORGE_PULL_REQUEST_QUERIES[forge];
+  const command = `${forge} pr list ${filter} ${branch}`;
+  const argv: string[] = [
+    "pr",
+    "list",
+    filter,
+    branch,
+    "--state",
+    "all",
+    "--json",
+    ["number", query.stateField, query.headField, query.baseField].join(","),
+  ];
+  const raw = runTool({ command: forge, args: argv, repo });
+  return parsePullRequestRows(raw, command, query);
+}
+
+interface PrGraph {
+  readonly byHead: Map<string, ForgePullRequest[]>;
+  readonly openByBase: Map<string, ForgePullRequest[]>;
+  readonly checkedBases: Set<string>;
+  readonly truncated: boolean;
+}
+
+function buildPrGraph(
+  rows: readonly ForgePullRequest[],
+  truncated: boolean
+): PrGraph {
   const byHead = new Map<string, ForgePullRequest[]>();
   const openByBase = new Map<string, ForgePullRequest[]>();
   for (const row of rows) {
@@ -1109,22 +1155,48 @@ function buildPrGraph(rows: readonly ForgePullRequest[]): PrGraph {
       (openByBase.get(row.base) ?? openByBase.set(row.base, []).get(row.base)!).push(row);
     }
   }
-  return { byHead, openByBase };
+  return { byHead, openByBase, checkedBases: new Set(), truncated };
 }
 
-function headPrFor(
-  graph: PrGraph,
-  branch: string,
-  forge: Forge
-): ForgePullRequest {
-  const rows = graph.byHead.get(branch) ?? [];
-  const row = rows[0];
+function headPrFor({
+  graph,
+  branch,
+  forge,
+  repo,
+}: {
+  graph: PrGraph;
+  branch: string;
+  forge: Forge;
+  repo: string;
+}): ForgePullRequest {
+  let rows = graph.byHead.get(branch);
+  if (rows === undefined && graph.truncated) {
+    const fetched = listBranchPullRequests({
+      filter: "--head",
+      branch,
+      forge,
+      repo,
+    });
+    rows = [...fetched];
+    graph.byHead.set(branch, rows);
+    for (const row of fetched) {
+      if (row.state === "OPEN") {
+        const baseChildren = graph.openByBase.get(row.base);
+        if (baseChildren === undefined) {
+          graph.openByBase.set(row.base, [row]);
+        } else if (!baseChildren.some((item) => item.pr === row.pr)) {
+          baseChildren.push(row);
+        }
+      }
+    }
+  }
+  const row = (rows ?? [])[0];
   if (row === undefined) {
     throw new UserError(
       `branch ${branch} has no pull request; open one with ${forge} pr create, or resolve the frontier from a branch whose chain is fully submitted`
     );
   }
-  if (rows.length > 1) {
+  if (rows !== undefined && rows.length > 1) {
     throw new UserError(
       `branch ${branch} has multiple pull requests (${rows.map((item) => `#${item.pr}`).join(", ")}); close the stale ones first`
     );
@@ -1132,10 +1204,36 @@ function headPrFor(
   return row;
 }
 
-function openChildrenOf(
-  graph: PrGraph,
-  branch: string
-): readonly ForgePullRequest[] {
+function openChildrenOf({
+  graph,
+  branch,
+  forge,
+  repo,
+}: {
+  graph: PrGraph;
+  branch: string;
+  forge: Forge;
+  repo: string;
+}): readonly ForgePullRequest[] {
+  if (graph.truncated && !graph.checkedBases.has(branch)) {
+    graph.checkedBases.add(branch);
+    const fetched = listBranchPullRequests({
+      filter: "--base",
+      branch,
+      forge,
+      repo,
+    }).filter((row) => row.state === "OPEN");
+    graph.openByBase.set(branch, [...fetched]);
+    for (const row of fetched) {
+      const headRows = graph.byHead.get(row.branch);
+      if (headRows === undefined) {
+        graph.byHead.set(row.branch, [row]);
+      } else if (!headRows.some((item) => item.pr === row.pr)) {
+        headRows.push(row);
+      }
+    }
+    return fetched;
+  }
   return graph.openByBase.get(branch) ?? [];
 }
 
@@ -1199,9 +1297,10 @@ function resolveFrontier(repo: string, forge: Forge): readonly FrontierPr[] {
   if (current === trunk) {
     return [];
   }
-  const graph = buildPrGraph(listAllPullRequests({ forge, repo }));
+  const { rows, truncated } = listAllPullRequests({ forge, repo });
+  const graph = buildPrGraph(rows, truncated);
   const seen = new Set([current]);
-  let bottom = headPrFor(graph, current, forge);
+  let bottom = headPrFor({ graph, branch: current, forge, repo });
   const chain = [bottom];
   while (bottom.base !== trunk) {
     if (seen.has(bottom.base)) {
@@ -1210,12 +1309,12 @@ function resolveFrontier(repo: string, forge: Forge): readonly FrontierPr[] {
       );
     }
     seen.add(bottom.base);
-    bottom = headPrFor(graph, bottom.base, forge);
+    bottom = headPrFor({ graph, branch: bottom.base, forge, repo });
     chain.unshift(bottom);
   }
   let tip = current;
   for (;;) {
-    const children = openChildrenOf(graph, tip);
+    const children = openChildrenOf({ graph, branch: tip, forge, repo });
     const child = children[0];
     if (child === undefined) {
       break;
